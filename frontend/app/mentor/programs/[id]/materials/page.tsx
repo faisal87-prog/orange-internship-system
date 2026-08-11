@@ -51,13 +51,18 @@ export default function ProgramMaterialsPage() {
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!program) return;
-    const form = new FormData(e.currentTarget);
-    const title = String(form.get("title") || "");
+    const formEl = e.currentTarget;
+    const form = new FormData(formEl);
+    const title = String(form.get("title") || "").trim();
     const externalLink = String(form.get("externalLink") || "").trim();
     const fileField = form.get("file");
     const file = fileField instanceof File && fileField.name ? fileField : null;
+    if (!title) {
+      setMessage("Title is required.");
+      return;
+    }
     if (!file && !externalLink) {
-      setMessage("Provide a file or an external link.");
+      setMessage("Please provide a file or an external link.");
       return;
     }
     setBusy(true);
@@ -71,7 +76,7 @@ export default function ProgramMaterialsPage() {
       });
       setItems((prev) => [...prev, created]);
       setMessage("Reference material added.");
-      e.currentTarget.reset();
+      formEl.reset();
     } catch (err) {
       setMessage(getErrorMessage(err, "Could not add material."));
     } finally {

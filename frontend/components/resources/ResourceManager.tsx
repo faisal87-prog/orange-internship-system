@@ -31,15 +31,20 @@ export function ResourceManager({
 
   async function onAdd(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    const form = new FormData(e.currentTarget);
+    const formEl = e.currentTarget;
+    const form = new FormData(formEl);
     const resourceTitle = String(form.get("title") || "").trim();
     const externalLink = String(form.get("externalLink") || "").trim();
     const files = form
       .getAll("files")
       .filter((f): f is File => f instanceof File && Boolean(f.name));
 
-    if (!resourceTitle && files.length === 0 && !externalLink) {
-      setMessage("Add a title with a file and/or an external link.");
+    if (!resourceTitle) {
+      setMessage("Resource title is required.");
+      return;
+    }
+    if (files.length === 0 && !externalLink) {
+      setMessage("Please provide a file or an external link.");
       return;
     }
 
@@ -53,7 +58,7 @@ export function ResourceManager({
         });
         onChange([...resources, ...created]);
         setMessage("Resource(s) added.");
-        e.currentTarget.reset();
+        formEl.reset();
       } catch (error) {
         setMessage(getErrorMessage(error, "Could not add resource."));
       } finally {
@@ -72,29 +77,23 @@ export function ResourceManager({
           fileName: file.name,
           kind: inferResourceKind(file.name),
           href: MOCK_PDF_HREF,
+          externalUrl: externalLink || undefined,
           file,
         });
       });
-    } else if (externalLink) {
+    } else {
       next.push({
         id: `res-local-${Date.now()}`,
         title: resourceTitle || externalLink,
         kind: "LINK",
         href: externalLink,
-      });
-    } else {
-      next.push({
-        id: `res-local-${Date.now()}`,
-        title: resourceTitle,
-        kind: "OTHER",
-        href: MOCK_PDF_HREF,
-        fileName: "placeholder.pdf",
+        externalUrl: externalLink,
       });
     }
 
     onChange(next);
     setMessage("Resources staged. They will upload when you save.");
-    e.currentTarget.reset();
+    formEl.reset();
   }
 
   async function handleRemove(id: string) {

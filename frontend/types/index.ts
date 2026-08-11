@@ -84,8 +84,10 @@ export interface LearningResource {
   kind: ResourceKind;
   /** Display file name for uploads */
   fileName?: string;
-  /** Local mock path or external URL */
+  /** Primary open/download target (file URL when present, otherwise external link) */
   href: string;
+  /** Optional external link retained alongside an uploaded file */
+  externalUrl?: string;
 }
 
 export interface ReferenceMaterial extends LearningResource {
@@ -160,11 +162,17 @@ export interface TaskAssignment {
   completedAt?: string;
 }
 
+export interface SubmissionFile {
+  id: string;
+  name: string;
+  url: string;
+}
+
 export interface Submission {
   id: string;
   taskAssignmentId: string;
   writtenResponse?: string;
-  files: string[];
+  files: SubmissionFile[];
   externalLink?: string;
   submissionVersion: number;
   internNotes?: string;

@@ -17,11 +17,20 @@ import {
   updateRoadmap,
   updateRoadmapWeek,
 } from "@/lib/api/roadmaps";
+import { createTask, deleteTask, updateTask } from "@/lib/api/tasks";
 import { fullName } from "@/lib/names";
 import type { Roadmap, RoadmapScope, RoadmapTaskDraft, RoadmapWeek } from "@/types";
 
 function newId(prefix: string) {
   return `${prefix}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function isPersistedTaskId(id: string) {
+  return /^\d+$/.test(id);
+}
+
+function defaultDueDate() {
+  return new Date().toISOString().slice(0, 10);
 }
 
 function emptyTask(): RoadmapTaskDraft {
@@ -70,6 +79,7 @@ export default function EditRoadmapPage() {
     | { type: "task"; weekNumber: number; taskId: string }
     | null
   >(null);
+  const [removedTaskIds, setRemovedTaskIds] = useState<string[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -166,12 +176,24 @@ export default function EditRoadmapPage() {
     if (deleteTarget.type === "week") {
       setRoadmap((prev) => {
         if (!prev) return prev;
+        const week = prev.weeks.find((w) => w.weekNumber === deleteTarget.weekNumber);
+        const persistedTaskIds = (week?.suggestedTasks || [])
+          .map((t) => t.id)
+          .filter(isPersistedTaskId);
+        if (persistedTaskIds.length) {
+          setRemovedTaskIds((ids) => [...ids, ...persistedTaskIds]);
+        }
         const weeks = renumberWeeks(
           prev.weeks.filter((w) => w.weekNumber !== deleteTarget.weekNumber),
         );
         return { ...prev, weeks, numberOfWeeks: weeks.length };
       });
     } else {
+      if (isPersistedTaskId(deleteTarget.taskId)) {
+        setRemovedTaskIds((ids) =>
+          ids.includes(deleteTarget.taskId) ? ids : [...ids, deleteTarget.taskId],
+        );
+      }
       updateWeek(deleteTarget.weekNumber, (week) => ({
         ...week,
         suggestedTasks: week.suggestedTasks.filter((t) => t.id !== deleteTarget.taskId),
@@ -189,7 +211,7 @@ export default function EditRoadmapPage() {
       ),
     }));
     setEditingTask(null);
-    setMessage("Task updated locally. Nested roadmap tasks are not persisted via the week API.");
+    setMessage("Task updated in the editor. Click Save draft to persist changes.");
   }
 
   async function saveDraft() {
@@ -206,6 +228,10 @@ export default function EditRoadmapPage() {
           roadmap.scope === "PROGRAM" ? [] : roadmap.assignedInternIds.map(Number),
       });
 
+      for (const taskId of removedTaskIds) {
+        await deleteTask(taskId);
+      }
+
       const weeks = [...roadmap.weeks];
       for (let i = 0; i < weeks.length; i += 1) {
         const week = weeks[i];
@@ -219,17 +245,69 @@ export default function EditRoadmapPage() {
         };
         if (week.id) {
           const saved = await updateRoadmapWeek(week.id, payload);
-          weeks[i] = { ...week, ...saved, id: week.id };
+          weeks[i] = {
+            ...week,
+            ...saved,
+            id: week.id,
+            suggestedTasks: week.suggestedTasks,
+          };
         } else {
           const created = await createRoadmapWeek({
             roadmap: Number(roadmap.id),
             ...payload,
           });
-          weeks[i] = { ...week, ...created, id: created.id ?? week.id };
+          weeks[i] = {
+            ...week,
+            ...created,
+            id: created.id ?? week.id,
+            suggestedTasks: week.suggestedTasks,
+          };
         }
+
+        const weekId = weeks[i].id;
+        if (!weekId) continue;
+
+        const savedTasks: RoadmapTaskDraft[] = [];
+        for (let taskIndex = 0; taskIndex < week.suggestedTasks.length; taskIndex += 1) {
+          const task = week.suggestedTasks[taskIndex];
+          const taskPayload = {
+            programId: roadmap.programId,
+            roadmapWeekId: weekId,
+            title: task.title,
+            description: task.description,
+            difficulty: task.difficulty,
+            estimatedTime: task.estimatedTime,
+            deliverable: task.deliverable,
+            successCriteria: task.successCriteria,
+            dueDate: task.dueDate || defaultDueDate(),
+            requirementType: task.requirementType,
+            source: task.source || "MANUAL",
+            displayOrder: taskIndex,
+            assignInternIds: task.assignedInternIds || [],
+          };
+          if (isPersistedTaskId(task.id)) {
+            const saved = await updateTask(task.id, taskPayload);
+            savedTasks.push({
+              ...task,
+              id: saved.id,
+              source: saved.source,
+              dueDate: saved.defaultDeadline || task.dueDate,
+            });
+          } else {
+            const created = await createTask(taskPayload);
+            savedTasks.push({
+              ...task,
+              id: created.id,
+              source: created.source || "MANUAL",
+              dueDate: created.defaultDeadline || task.dueDate,
+            });
+          }
+        }
+        weeks[i] = { ...weeks[i], suggestedTasks: savedTasks };
       }
 
       const refreshed = await getRoadmap(roadmap.id);
+      setRemovedTaskIds([]);
       setRoadmap({
         ...updated,
         ...refreshed,

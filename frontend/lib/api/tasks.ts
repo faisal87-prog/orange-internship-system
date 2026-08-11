@@ -25,6 +25,18 @@ export async function createTask(payload: Record<string, unknown>) {
   return adaptTask(data);
 }
 
+export async function updateTask(id: string, payload: Record<string, unknown>) {
+  const data = await apiRequest(`/api/tasks/${id}/`, {
+    method: "PATCH",
+    body: taskToApiPayload(payload),
+  });
+  return adaptTask(data);
+}
+
+export async function deleteTask(id: string) {
+  await apiRequest(`/api/tasks/${id}/`, { method: "DELETE" });
+}
+
 export async function listAssignments(): Promise<TaskAssignment[]> {
   const data = await apiRequest("/api/tasks/assignments/");
   return unwrapList(data).map(adaptAssignment);

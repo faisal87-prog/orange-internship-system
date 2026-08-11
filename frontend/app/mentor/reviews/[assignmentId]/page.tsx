@@ -66,25 +66,49 @@ export default function ReviewSubmissionPage() {
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     if (!assignment) return;
-    const parsed = Number(score);
-    if (!Number.isInteger(parsed) || parsed < 0 || parsed > 100) {
-      setMessage("Score must be an integer between 0 and 100.");
-      return;
-    }
     if (status !== "COMPLETED" && status !== "NEEDS_REVISION") {
       setMessage("Outcome must be Completed or Needs revision.");
       return;
     }
+
+    const trimmedScore = score.trim();
+    const payload: Record<string, unknown> = {
+      mentor_feedback: feedback,
+      status,
+    };
+
+    if (status === "COMPLETED") {
+      const parsed = Number(trimmedScore);
+      if (
+        trimmedScore === "" ||
+        !Number.isInteger(parsed) ||
+        parsed < 0 ||
+        parsed > 100
+      ) {
+        setMessage("Score must be an integer between 0 and 100.");
+        return;
+      }
+      payload.score = parsed;
+    } else if (trimmedScore === "") {
+      payload.score = null;
+    } else {
+      const parsed = Number(trimmedScore);
+      if (!Number.isInteger(parsed) || parsed < 0 || parsed > 100) {
+        setMessage("Score must be an integer between 0 and 100.");
+        return;
+      }
+      payload.score = parsed;
+    }
+
     setSaving(true);
     setMessage("");
     try {
-      const updated = await updateAssignment(assignment.id, {
-        score: parsed,
-        mentor_feedback: feedback,
-        status,
-      });
+      const updated = await updateAssignment(assignment.id, payload);
       setAssignment(updated);
-      setMessage(`Review saved. Status set to ${status}. Score ${parsed}/100.`);
+      setScore(updated.score?.toString() ?? "");
+      const scoreText =
+        typeof updated.score === "number" ? ` Score ${updated.score}/100.` : "";
+      setMessage(`Review saved. Status set to ${status}.${scoreText}`);
     } catch (err) {
       setMessage(getErrorMessage(err, "Could not save review."));
     } finally {
@@ -120,13 +144,43 @@ export default function ReviewSubmissionPage() {
           </div>
           <div>
             <h2 className="font-semibold text-ink">Files</h2>
-            <p className="mt-1 text-sm text-ink-muted">
-              {latest?.files.join(", ") || "None"}
-            </p>
+            {latest?.files?.length ? (
+              <ul className="mt-1 space-y-1 text-sm">
+                {latest.files.map((file) => (
+                  <li key={file.id || file.name}>
+                    {file.url ? (
+                      <a
+                        href={file.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-brand underline"
+                      >
+                        {file.name}
+                      </a>
+                    ) : (
+                      <span className="text-ink-muted">{file.name}</span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-1 text-sm text-ink-muted">None</p>
+            )}
           </div>
           <div>
             <h2 className="font-semibold text-ink">External link</h2>
-            <p className="mt-1 text-sm text-ink-muted">{latest?.externalLink || "None"}</p>
+            {latest?.externalLink ? (
+              <a
+                href={latest.externalLink}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-1 inline-block text-sm text-brand underline"
+              >
+                {latest.externalLink}
+              </a>
+            ) : (
+              <p className="mt-1 text-sm text-ink-muted">None</p>
+            )}
           </div>
           {latest?.internNotes ? (
             <div>
@@ -149,7 +203,9 @@ export default function ReviewSubmissionPage() {
             />
           </div>
           <div>
-            <label className="label" htmlFor="score">Score (0–100, integer)</label>
+            <label className="label" htmlFor="score">
+              Score (0–100{status === "COMPLETED" ? ", required" : ", optional"})
+            </label>
             <input
               id="score"
               type="number"
@@ -159,7 +215,7 @@ export default function ReviewSubmissionPage() {
               className="input"
               value={score}
               onChange={(e) => setScore(e.target.value)}
-              required
+              required={status === "COMPLETED"}
             />
           </div>
           <div>

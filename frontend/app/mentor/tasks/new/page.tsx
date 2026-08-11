@@ -83,9 +83,10 @@ export default function CreateTaskPage() {
           task: Number(task.id),
           title: resource.title,
           external_url:
-            resource.kind === "LINK" || resource.href?.startsWith("http")
+            resource.externalUrl ||
+            (resource.kind === "LINK" || resource.href?.startsWith("http")
               ? resource.href
-              : undefined,
+              : undefined),
           file: resource.file ?? null,
         });
       }

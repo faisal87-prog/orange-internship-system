@@ -27,6 +27,11 @@ class ProgramReferenceMaterialSerializer(serializers.ModelSerializer):
             "updated_at",
         ]
         read_only_fields = ["id", "file_size", "created_at", "updated_at", "file_url"]
+        extra_kwargs = {
+            "resource_type": {"required": False},
+            "file": {"required": False, "allow_null": True},
+            "external_url": {"required": False, "allow_blank": True},
+        }
 
     def get_file_url(self, obj):
         request = self.context.get("request")
@@ -37,13 +42,17 @@ class ProgramReferenceMaterialSerializer(serializers.ModelSerializer):
         return None
 
     def validate(self, attrs):
-        file = attrs.get("file") or getattr(self.instance, "file", None)
-        external_url = attrs.get("external_url", getattr(self.instance, "external_url", ""))
+        file = attrs["file"] if "file" in attrs else getattr(self.instance, "file", None)
+        external_url = (
+            attrs["external_url"]
+            if "external_url" in attrs
+            else getattr(self.instance, "external_url", "")
+        )
         if file:
             validate_upload_file(file)
         if not file and not external_url:
-            raise serializers.ValidationError("Provide a file or an external URL.")
-        if "resource_type" not in attrs:
+            raise serializers.ValidationError("Please provide a file or an external link.")
+        if "resource_type" not in attrs or not attrs.get("resource_type"):
             attrs["resource_type"] = infer_resource_type(
                 getattr(file, "name", None),
                 external_url,

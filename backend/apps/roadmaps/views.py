@@ -22,7 +22,7 @@ class RoadmapViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         user = self.request.user
         qs = Roadmap.objects.select_related("program", "approved_by").prefetch_related(
-            "weeks",
+            "weeks__tasks__resources",
             "assigned_interns",
         )
         if user.role == Role.ADMIN:
@@ -71,7 +71,9 @@ class RoadmapWeekViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
-        qs = RoadmapWeek.objects.select_related("roadmap__program")
+        qs = RoadmapWeek.objects.select_related("roadmap__program").prefetch_related(
+            "tasks__resources"
+        )
         if user.role == Role.ADMIN:
             return qs
         if user.role == Role.MENTOR:

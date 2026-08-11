@@ -87,7 +87,8 @@ export default function InternTaskDetailPage() {
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    const form = new FormData(e.currentTarget);
+    const formEl = e.currentTarget;
+    const form = new FormData(formEl);
     const writtenResponse = String(form.get("writtenResponse") || "");
     const externalLink = String(form.get("externalLink") || "");
     const internNotes = String(form.get("internNotes") || "");
@@ -107,7 +108,7 @@ export default function InternTaskDetailPage() {
       setSubs((prev) => [...prev, created]);
       setStatus("SUBMITTED");
       setMessage(`Submission version ${created.submissionVersion} saved.`);
-      e.currentTarget.reset();
+      formEl.reset();
     } catch (err) {
       setMessage(getErrorMessage(err, "Unable to submit work."));
     }
@@ -202,10 +203,44 @@ export default function InternTaskDetailPage() {
               <li key={sub.id} className="rounded-xl border border-line p-3 text-sm">
                 <p className="font-semibold">Version {sub.submissionVersion}</p>
                 <p className="mt-1 text-ink-muted">{sub.writtenResponse || "No written response"}</p>
-                <p className="mt-2 text-xs text-ink-muted">
-                  {formatDateTime(sub.submittedAt)} · Files: {sub.files.join(", ") || "None"}
-                  {sub.externalLink ? ` · ${sub.externalLink}` : ""}
-                </p>
+                <div className="mt-2 space-y-1 text-xs text-ink-muted">
+                  <p>{formatDateTime(sub.submittedAt)}</p>
+                  <p>
+                    Files:{" "}
+                    {sub.files.length
+                      ? sub.files.map((file, index) => (
+                          <span key={file.id || `${sub.id}-file-${index}`}>
+                            {index > 0 ? ", " : null}
+                            {file.url ? (
+                              <a
+                                href={file.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-brand underline"
+                              >
+                                {file.name}
+                              </a>
+                            ) : (
+                              file.name
+                            )}
+                          </span>
+                        ))
+                      : "None"}
+                  </p>
+                  {sub.externalLink ? (
+                    <p>
+                      Link:{" "}
+                      <a
+                        href={sub.externalLink}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-brand underline"
+                      >
+                        {sub.externalLink}
+                      </a>
+                    </p>
+                  ) : null}
+                </div>
               </li>
             ))}
           {subs.length === 0 ? <li className="text-ink-muted">No submissions yet.</li> : null}

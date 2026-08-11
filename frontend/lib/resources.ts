@@ -76,8 +76,10 @@ export function toLearningResource(input: {
   fileName?: string;
   href?: string;
   externalLink?: string;
+  externalUrl?: string;
 }): LearningResource {
-  const href = input.href || input.externalLink || MOCK_PDF_HREF;
+  const externalUrl = input.externalUrl || input.externalLink || "";
+  const href = input.href || externalUrl || MOCK_PDF_HREF;
   const kind = inferResourceKind(input.fileName, href);
   return {
     id: input.id,
@@ -85,5 +87,6 @@ export function toLearningResource(input: {
     kind,
     fileName: input.fileName,
     href,
+    externalUrl: externalUrl || undefined,
   };
 }

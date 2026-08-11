@@ -232,6 +232,73 @@ class BackendCoreTests(TestCase):
         self.assignment.refresh_from_db()
         self.assertEqual(self.assignment.score, 90)
 
+    def test_needs_revision_allows_missing_score(self):
+        self.auth(self.mentor)
+        response = self.client.patch(
+            f"/api/tasks/assignments/{self.assignment.id}/",
+            {
+                "status": TaskAssignmentStatus.NEEDS_REVISION,
+                "mentor_feedback": "Please revise the write-up.",
+                "score": None,
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assignment.refresh_from_db()
+        self.assertEqual(self.assignment.status, TaskAssignmentStatus.NEEDS_REVISION)
+        self.assertIsNone(self.assignment.score)
+
+    def test_completed_requires_score(self):
+        self.auth(self.mentor)
+        response = self.client.patch(
+            f"/api/tasks/assignments/{self.assignment.id}/",
+            {
+                "status": TaskAssignmentStatus.COMPLETED,
+                "mentor_feedback": "Done",
+                "score": None,
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("score", response.data)
+
+        response = self.client.patch(
+            f"/api/tasks/assignments/{self.assignment.id}/",
+            {
+                "status": TaskAssignmentStatus.COMPLETED,
+                "mentor_feedback": "Done",
+                "score": 0,
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assignment.refresh_from_db()
+        self.assertEqual(self.assignment.score, 0)
+        self.assertEqual(self.assignment.status, TaskAssignmentStatus.COMPLETED)
+
+    def test_task_resource_retains_file_and_external_link(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        self.auth(self.mentor)
+        upload = SimpleUploadedFile(
+            "guide.pdf",
+            b"%PDF-1.4 sample",
+            content_type="application/pdf",
+        )
+        response = self.client.post(
+            "/api/tasks/resources/",
+            {
+                "task": self.task.id,
+                "title": "Guide with link",
+                "external_url": "https://example.com/extra",
+                "file": upload,
+            },
+            format="multipart",
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertTrue(response.data.get("file_url"))
+        self.assertEqual(response.data.get("external_url"), "https://example.com/extra")
+
     def test_submission_versioning(self):
         self.auth(self.intern_user)
         for expected_version in (1, 2):
@@ -246,6 +313,74 @@ class BackendCoreTests(TestCase):
             self.assertEqual(response.status_code, status.HTTP_201_CREATED)
             self.assertEqual(response.data["version_number"], expected_version)
         self.assertEqual(Submission.objects.filter(task_assignment=self.assignment).count(), 2)
+
+    def test_program_material_accepts_link_only_and_infers_type(self):
+        self.auth(self.mentor)
+        response = self.client.post(
+            "/api/programs/materials/items/",
+            {
+                "program": self.program.id,
+                "title": "Style guide",
+                "external_url": "https://example.com/guide",
+            },
+            format="multipart",
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data["resource_type"], "LINK")
+        self.assertEqual(response.data["external_url"], "https://example.com/guide")
+
+    def test_program_material_requires_file_or_link(self):
+        self.auth(self.mentor)
+        response = self.client.post(
+            "/api/programs/materials/items/",
+            {
+                "program": self.program.id,
+                "title": "Missing both",
+            },
+            format="multipart",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn(
+            "Please provide a file or an external link.",
+            str(response.data),
+        )
+
+    def test_task_resource_accepts_link_only(self):
+        self.auth(self.mentor)
+        response = self.client.post(
+            "/api/tasks/resources/",
+            {
+                "task": self.task.id,
+                "title": "Docs",
+                "external_url": "https://docs.example.com",
+            },
+            format="multipart",
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data["resource_type"], "LINK")
+
+    def test_roadmap_includes_week_tasks_without_assignment_filter(self):
+        ai_task = Task.objects.create(
+            roadmap_week=self.week,
+            program=self.program,
+            created_by=self.mentor,
+            title="AI Task",
+            description="Generated",
+            difficulty=TaskDifficulty.EASY,
+            estimated_time_minutes=30,
+            due_date=date.today(),
+            requirement_type=RequirementType.OPTIONAL,
+            source=TaskSource.AI_GENERATED,
+        )
+        self.auth(self.mentor)
+        response = self.client.get(f"/api/roadmaps/{self.week.roadmap_id}/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        weeks = response.data["weeks"]
+        self.assertEqual(len(weeks), 1)
+        task_ids = {task["id"] for task in weeks[0]["tasks"]}
+        self.assertIn(self.task.id, task_ids)
+        self.assertIn(ai_task.id, task_ids)
+        self.assertEqual(len(weeks[0]["tasks"]), 2)
 
     def test_weekly_score_calculation(self):
         TaskAssignment.objects.filter(id=self.assignment.id).update(score=80)

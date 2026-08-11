@@ -26,6 +26,11 @@ class TaskResourceSerializer(serializers.ModelSerializer):
             "updated_at",
         ]
         read_only_fields = ["id", "file_size", "created_at", "updated_at", "file_url"]
+        extra_kwargs = {
+            "resource_type": {"required": False},
+            "file": {"required": False, "allow_null": True},
+            "external_url": {"required": False, "allow_blank": True},
+        }
 
     def get_file_url(self, obj):
         request = self.context.get("request")
@@ -36,13 +41,17 @@ class TaskResourceSerializer(serializers.ModelSerializer):
         return None
 
     def validate(self, attrs):
-        file = attrs.get("file") or getattr(self.instance, "file", None)
-        external_url = attrs.get("external_url", getattr(self.instance, "external_url", ""))
+        file = attrs["file"] if "file" in attrs else getattr(self.instance, "file", None)
+        external_url = (
+            attrs["external_url"]
+            if "external_url" in attrs
+            else getattr(self.instance, "external_url", "")
+        )
         if file:
             validate_upload_file(file)
         if not file and not external_url:
-            raise serializers.ValidationError("Provide a file or an external URL.")
-        if "resource_type" not in attrs:
+            raise serializers.ValidationError("Please provide a file or an external link.")
+        if "resource_type" not in attrs or not attrs.get("resource_type"):
             attrs["resource_type"] = infer_resource_type(
                 getattr(file, "name", None),
                 external_url,
@@ -95,6 +104,10 @@ class TaskSerializer(serializers.ModelSerializer):
         for intern in intern_ids:
             TaskAssignment.objects.create(task=task, intern=intern)
         return task
+
+    def update(self, instance, validated_data):
+        validated_data.pop("assign_intern_ids", None)
+        return super().update(instance, validated_data)
 
 
 class TaskAssignmentSerializer(serializers.ModelSerializer):
@@ -150,6 +163,22 @@ class TaskAssignmentSerializer(serializers.ModelSerializer):
         validate_score(value)
         return value
 
+    def validate(self, attrs):
+        status_value = attrs.get(
+            "status",
+            getattr(self.instance, "status", None),
+        )
+        if "score" in attrs:
+            score = attrs.get("score")
+        else:
+            score = getattr(self.instance, "score", None) if self.instance else None
+
+        if status_value == TaskAssignmentStatus.COMPLETED and score is None:
+            raise serializers.ValidationError(
+                {"score": "A score from 0 to 100 is required to mark the task as completed."}
+            )
+        return attrs
+
     def validate_status(self, value):
         request = self.context.get("request")
         instance = self.instance
@@ -173,11 +202,11 @@ class TaskAssignmentSerializer(serializers.ModelSerializer):
         return value
 
     def update(self, instance, validated_data):
-        score = validated_data.get("score", instance.score)
         status_value = validated_data.get("status", instance.status)
-        if score is not None and status_value == TaskAssignmentStatus.COMPLETED:
+        if status_value == TaskAssignmentStatus.COMPLETED:
             validated_data.setdefault("reviewed_at", timezone.now())
             validated_data.setdefault("completed_at", timezone.now())
-        elif status_value == TaskAssignmentStatus.COMPLETED:
-            validated_data.setdefault("completed_at", timezone.now())
+        elif status_value == TaskAssignmentStatus.NEEDS_REVISION:
+            validated_data.setdefault("reviewed_at", timezone.now())
+            validated_data["completed_at"] = None
         return super().update(instance, validated_data)

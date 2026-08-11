@@ -114,6 +114,9 @@ export default function MentorTaskAssignmentPage() {
     files: File[];
   }): Promise<LearningResource[]> {
     if (!task) return [];
+    if (!input.files.length && !input.externalLink) {
+      throw new Error("Please provide a file or an external link.");
+    }
     const created: LearningResource[] = [];
     if (input.files.length) {
       for (const file of input.files) {
@@ -229,10 +232,43 @@ export default function MentorTaskAssignmentPage() {
             <li key={sub.id} className="rounded-xl border border-line p-3 text-sm">
               <p className="font-semibold">Version {sub.submissionVersion}</p>
               <p className="mt-1 text-ink-muted">{sub.writtenResponse}</p>
-              <p className="mt-2 text-xs text-ink-muted">
-                Files: {sub.files.join(", ") || "None"}
-                {sub.externalLink ? ` · Link: ${sub.externalLink}` : ""}
-              </p>
+              <div className="mt-2 space-y-1 text-xs text-ink-muted">
+                <p>
+                  Files:{" "}
+                  {sub.files.length
+                    ? sub.files.map((file, index) => (
+                        <span key={file.id || `${sub.id}-file-${index}`}>
+                          {index > 0 ? ", " : null}
+                          {file.url ? (
+                            <a
+                              href={file.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-brand underline"
+                            >
+                              {file.name}
+                            </a>
+                          ) : (
+                            file.name
+                          )}
+                        </span>
+                      ))
+                    : "None"}
+                </p>
+                {sub.externalLink ? (
+                  <p>
+                    Link:{" "}
+                    <a
+                      href={sub.externalLink}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-brand underline"
+                    >
+                      {sub.externalLink}
+                    </a>
+                  </p>
+                ) : null}
+              </div>
             </li>
           ))}
           {subs.length === 0 ? <li className="text-ink-muted">No submissions yet.</li> : null}

@@ -127,13 +127,20 @@ export function adaptInternProfile(raw: any): InternProfile {
 }
 
 export function adaptResource(raw: any): LearningResource {
-  const href = raw.file_url || raw.external_url || raw.href || "#";
+  const fileUrl = resolveMediaUrl(raw.file_url || "");
+  const externalUrl = String(raw.external_url || raw.externalUrl || raw.externalLink || "").trim();
+  let fileName = raw.original_file_name || raw.file_name || raw.fileName;
+  if (!fileName && typeof raw.file === "string" && raw.file) {
+    fileName = raw.file.split("/").pop();
+  }
+  const href = fileUrl || externalUrl || raw.href || "#";
   return {
     id: String(raw.id),
     title: raw.title,
     kind: mapResourceKind(raw.resource_type || raw.kind),
-    fileName: raw.original_file_name || raw.file_name || raw.fileName,
+    fileName: fileName || undefined,
     href,
+    externalUrl: externalUrl || undefined,
   };
 }
 
@@ -243,21 +250,6 @@ export function adaptAssignment(raw: any): TaskAssignment {
   };
 }
 
-export function adaptSubmission(raw: any): Submission {
-  return {
-    id: String(raw.id),
-    taskAssignmentId: String(raw.task_assignment?.id ?? raw.task_assignment),
-    writtenResponse: raw.written_response || raw.writtenResponse || "",
-    files: (raw.files || []).map(
-      (file: any) => file.original_file_name || file.file_url || String(file.id),
-    ),
-    externalLink: raw.external_url || raw.externalLink || "",
-    submissionVersion: Number(raw.version_number ?? raw.submissionVersion ?? 1),
-    internNotes: raw.intern_notes || raw.internNotes || "",
-    submittedAt: raw.submitted_at || raw.submittedAt,
-  };
-}
-
 export function adaptWeeklyReport(raw: any): WeeklyReport {
   return {
     id: String(raw.id),
@@ -322,10 +314,40 @@ export function programToApiPayload(input: Partial<InternshipProgram> & Record<s
   };
 }
 
-export function taskToApiPayload(input: Record<string, unknown>) {
+export function resolveMediaUrl(url: string | null | undefined): string {
+  if (!url) return "";
+  if (/^https?:\/\//i.test(url)) return url;
+  const base = (process.env.NEXT_PUBLIC_API_BASE_URL || "").replace(/\/$/, "");
+  return `${base}${url.startsWith("/") ? "" : "/"}${url}`;
+}
+
+export function adaptSubmission(raw: any): Submission {
   return {
+    id: String(raw.id),
+    taskAssignmentId: String(raw.task_assignment?.id ?? raw.task_assignment),
+    writtenResponse: raw.written_response || raw.writtenResponse || "",
+    files: (raw.files || []).map((file: any) => ({
+      id: String(file.id ?? file.original_file_name ?? ""),
+      name: file.original_file_name || file.file_name || file.name || "Download",
+      url: resolveMediaUrl(file.file_url || file.url || file.file || ""),
+    })),
+    externalLink: raw.external_url || raw.externalLink || "",
+    submissionVersion: Number(raw.version_number ?? raw.submissionVersion ?? 1),
+    internNotes: raw.intern_notes || raw.internNotes || "",
+    submittedAt: raw.submitted_at || raw.submittedAt,
+  };
+}
+
+export function taskToApiPayload(input: Record<string, unknown>) {
+  const roadmapWeek =
+    input.roadmapWeekId != null && input.roadmapWeekId !== ""
+      ? Number(input.roadmapWeekId)
+      : input.roadmap_week != null && input.roadmap_week !== ""
+        ? Number(input.roadmap_week)
+        : null;
+  const payload: Record<string, unknown> = {
     program: Number(input.programId || input.program),
-    roadmap_week: input.roadmapWeekId ? Number(input.roadmapWeekId) : null,
+    roadmap_week: Number.isFinite(roadmapWeek as number) ? roadmapWeek : null,
     title: input.title,
     description: input.description,
     difficulty: difficultyToApi(String(input.difficulty || "EASY")),
@@ -337,8 +359,18 @@ export function taskToApiPayload(input: Record<string, unknown>) {
     due_date: input.dueDate || input.due_date || input.deadline,
     requirement_type: input.requirementType || input.requirement_type || "REQUIRED",
     source: input.source || "MANUAL",
-    assign_intern_ids: ((input.assignInternIds as string[]) || []).map(Number),
   };
+  if (input.display_order != null || input.displayOrder != null) {
+    payload.display_order = Number(input.display_order ?? input.displayOrder);
+  }
+  if (input.assignInternIds != null || input.assign_intern_ids != null) {
+    payload.assign_intern_ids = (
+      (input.assignInternIds as string[]) ||
+      (input.assign_intern_ids as string[]) ||
+      []
+    ).map(Number);
+  }
+  return payload;
 }
 
 export type { };
