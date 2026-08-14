@@ -466,6 +466,7 @@ export default function EditRoadmapPage() {
             key={week.id ?? week.weekNumber}
             week={week}
             readOnly={false}
+            roadmapScope={roadmap.scope}
             actions={
               <>
                 <button type="button" className="btn-secondary px-3 py-1.5 text-xs" onClick={() => moveWeek(week.weekNumber, -1)}>

@@ -134,3 +134,13 @@ class RoadmapPublishSerializer(serializers.Serializer):
         roadmap.published_at = timezone.now()
         roadmap.save()
         return roadmap
+
+
+class RoadmapGenerateSerializer(serializers.Serializer):
+    program_id = serializers.IntegerField()
+    assignment_scope = serializers.ChoiceField(choices=RoadmapScope.CHOICES)
+    selected_intern_ids = serializers.ListField(
+        child=serializers.IntegerField(),
+        required=False,
+        allow_empty=True,
+    )

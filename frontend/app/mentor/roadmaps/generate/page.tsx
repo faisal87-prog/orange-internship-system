@@ -5,13 +5,14 @@ import { useRouter } from "next/navigation";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { InternChipPicker } from "@/components/interns/InternChips";
 import { ProgramSummary } from "@/components/programs/ProgramSummary";
+import { RoadmapGenerationLoader } from "@/components/roadmaps/RoadmapGenerationLoader";
 import { ErrorState, LoadingState } from "@/components/ui/AsyncState";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { useAuth } from "@/context/AuthContext";
 import { listInternProfiles } from "@/lib/api/accounts";
 import { getErrorMessage } from "@/lib/api/errors";
 import { listPrograms } from "@/lib/api/programs";
-import { createRoadmap, createRoadmapWeek } from "@/lib/api/roadmaps";
+import { generateRoadmap } from "@/lib/api/roadmaps";
 import { fullName } from "@/lib/names";
 import type { InternshipProgram } from "@/types";
 
@@ -62,7 +63,7 @@ export default function GenerateRoadmapPage() {
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
-    if (!selectedProgram) return;
+    if (!selectedProgram || saving) return;
     if (scope !== "PROGRAM" && selectedInternIds.length === 0) {
       setMessage("Select at least one intern for this roadmap scope.");
       return;
@@ -75,43 +76,38 @@ export default function GenerateRoadmapPage() {
     setSaving(true);
     setMessage("");
     try {
-      const weeks = Math.max(1, selectedProgram.durationWeeks || 1);
-      const roadmap = await createRoadmap({
-        program: Number(selectedProgram.id),
-        title: `${selectedProgram.title} — Learning Roadmap`,
-        summary: "Draft roadmap created for mentor editing.",
+      const roadmap = await generateRoadmap({
+        program_id: Number(selectedProgram.id),
         assignment_scope: scope,
-        number_of_weeks: weeks,
-        assigned_intern_ids:
-          scope === "PROGRAM" ? undefined : selectedInternIds.map(Number),
-        generated_by_ai: false,
+        selected_intern_ids:
+          scope === "PROGRAM" ? [] : selectedInternIds.map(Number),
       });
-
-      await Promise.all(
-        Array.from({ length: weeks }, (_, index) =>
-          createRoadmapWeek({
-            roadmap: Number(roadmap.id),
-            week_number: index + 1,
-            weekly_focus: "",
-            learning_objectives: [],
-            expected_skills_gained: [],
-            mentor_notes: "",
-            display_order: index + 1,
-          }),
-        ),
-      );
-
-      setMessage("Draft roadmap created. AI generation is not connected yet.");
       router.push(`/mentor/roadmaps/${roadmap.id}/edit`);
     } catch (err) {
-      setMessage(getErrorMessage(err, "Could not create draft roadmap."));
-    } finally {
       setSaving(false);
+      setMessage(
+        getErrorMessage(
+          err,
+          "AI roadmap generation is currently unavailable. Please try again.",
+        ),
+      );
     }
   }
 
   if (loading) return <LoadingState label="Loading…" />;
   if (error) return <ErrorState message={error} onRetry={() => void load()} />;
+
+  if (saving) {
+    return (
+      <div>
+        <PageHeader
+          title="Generate AI roadmap"
+          description="Please wait while your draft roadmap is being prepared."
+        />
+        <RoadmapGenerationLoader />
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -185,12 +181,12 @@ export default function GenerateRoadmapPage() {
           />
         ) : null}
         {message ? (
-          <p className="rounded-xl bg-brand-light px-3 py-2 text-sm text-brand-dark" role="status">
+          <p className="rounded-xl bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
             {message}
           </p>
         ) : null}
-        <button type="submit" className="btn-primary" disabled={saving || !programId}>
-          {saving ? "Creating draft…" : "Request AI generation"}
+        <button type="submit" className="btn-primary" disabled={!programId}>
+          Request AI generation
         </button>
       </form>
     </div>

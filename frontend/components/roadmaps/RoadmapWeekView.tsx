@@ -1,16 +1,27 @@
 import { InternChips } from "@/components/interns/InternChips";
 import { formatDate } from "@/lib/labels";
-import type { Roadmap, RoadmapTaskDraft, RoadmapWeek } from "@/types";
+import type { Roadmap, RoadmapScope, RoadmapTaskDraft, RoadmapWeek } from "@/types";
 
-function InternNames({
+function TaskApplicability({
   ids,
   internNames,
+  roadmapScope,
 }: {
   ids?: string[];
   internNames?: Record<string, string>;
+  roadmapScope?: RoadmapScope;
 }) {
+  if (roadmapScope === "PROGRAM") {
+    return <span className="text-ink-muted">Entire Program</span>;
+  }
   if (!ids?.length) {
-    return <span className="text-ink-muted">Program scope / unassigned</span>;
+    return (
+      <span className="text-ink-muted">
+        {roadmapScope === "GROUP" || roadmapScope === "INDIVIDUAL"
+          ? "No interns selected for this task"
+          : "Not specified"}
+      </span>
+    );
   }
   const items = ids.map((id) => ({
     id,
@@ -24,11 +35,13 @@ export function RoadmapTaskCard({
   readOnly = true,
   actions,
   internNames,
+  roadmapScope,
 }: {
   task: RoadmapTaskDraft;
   readOnly?: boolean;
   actions?: React.ReactNode;
   internNames?: Record<string, string>;
+  roadmapScope?: RoadmapScope;
 }) {
   return (
     <article className="rounded-xl border border-line bg-white p-4">
@@ -69,9 +82,15 @@ export function RoadmapTaskCard({
           <dd>{task.successCriteria}</dd>
         </div>
         <div className="sm:col-span-2">
-          <dt className="font-semibold text-ink-muted">Assigned interns</dt>
+          <dt className="font-semibold text-ink-muted">
+            {roadmapScope === "PROGRAM" ? "Applies to" : "Assigned interns"}
+          </dt>
           <dd>
-            <InternNames ids={task.assignedInternIds} internNames={internNames} />
+            <TaskApplicability
+              ids={task.assignedInternIds}
+              internNames={internNames}
+              roadmapScope={roadmapScope}
+            />
           </dd>
         </div>
       </dl>
@@ -86,12 +105,14 @@ export function RoadmapWeekCard({
   actions,
   taskActions,
   internNames,
+  roadmapScope,
 }: {
   week: RoadmapWeek;
   readOnly?: boolean;
   actions?: React.ReactNode;
   taskActions?: (task: RoadmapTaskDraft, weekNumber: number) => React.ReactNode;
   internNames?: Record<string, string>;
+  roadmapScope?: RoadmapScope;
 }) {
   return (
     <section className="card p-5">
@@ -146,6 +167,7 @@ export function RoadmapWeekCard({
             readOnly={readOnly}
             actions={taskActions?.(task, week.weekNumber)}
             internNames={internNames}
+            roadmapScope={roadmapScope}
           />
         ))}
       </div>
@@ -172,6 +194,7 @@ export function RoadmapReadOnlyView({
           week={week}
           readOnly
           internNames={internNames}
+          roadmapScope={roadmap.scope}
         />
       ))}
     </div>

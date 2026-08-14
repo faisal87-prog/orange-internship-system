@@ -155,3 +155,32 @@ ALLOWED_UPLOAD_EXTENSIONS = {
     ".csv",
     ".zip",
 }
+
+# OpenAI configuration (server-side only). Models are centralized here.
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+OPENAI_PROMPT_BUILDER_MODEL = os.getenv(
+    "OPENAI_PROMPT_BUILDER_MODEL",
+    "gpt-5.6-terra",
+)
+OPENAI_ROADMAP_MODEL = os.getenv(
+    "OPENAI_ROADMAP_MODEL",
+    "gpt-5.6-terra",
+)
+OPENAI_TIMEOUT_SECONDS = int(os.getenv("OPENAI_TIMEOUT_SECONDS", "60"))
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+        },
+    },
+    "loggers": {
+        "ai.generation": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False,
+        },
+    },
+}

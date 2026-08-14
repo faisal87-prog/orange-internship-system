@@ -1,6 +1,9 @@
 # AI Module
 
-> **Status:** Not implemented. Placeholder structure only.
+> **Runtime note:** Live OpenAI integration is implemented in
+> `backend/services/ai/` (Django server-side only).
+> This repository-root `ai/` folder remains documentation/scaffolding only
+> and is **not** executed by Django.
 
 AI integration layer for roadmap generation, weekly reports, and final summaries.
 
@@ -11,56 +14,26 @@ Every AI feature uses a **two-stage architecture**: Prompt Builder (Stage 1) the
 ```
 Mentor Input
      ↓
-Django Collects Data
+Django Collects Data (context assembler)
      ↓
-AI Prompt Builder          (Stage 1)
+AI Prompt Builder          (Stage 1 — OpenAI)
      ↓
 Generated Prompt
      ↓
-OpenAI LLM API             (Stage 2 — via generators/)
+OpenAI Roadmap Generator   (Stage 2)
      ↓
 Structured JSON
      ↓
-Validation                 (validators/)
+Validation
      ↓
 Draft
      ↓
 Mentor Review & Approval
 ```
 
-## Structure
-
-```
-ai/
-├── prompt_builder/     # Stage 1 — build optimized prompts from structured context
-├── prompts/            # Base templates used by Prompt Builder (not sent directly to LLM)
-├── generators/         # Stage 2 — send prompt to OpenAI, receive JSON response
-├── validators/         # Validate LLM output against output schemas
-├── schemas/            # Output JSON schemas for validation
-└── reference-materials/  # Reference material context handling (not implemented)
-```
-
-## Stage 1 — AI Prompt Builder
-
-Builds a complete structured context from database data and returns **one optimized prompt**.
-
-- Clear, structured, includes all relevant context
-- Follows business rules; respects roadmap scope
-- Includes reference materials where applicable
-- Never invents requirements or unapproved features
-
-## Stage 2 — AI Generation
-
-Sends the generated prompt to the OpenAI LLM API. Response must match the predefined output schema. Validated output is stored as **Draft** for Mentor review.
-
 ## Rules
 
 - Called only from Django backend
-- Prompt templates are **not** sent directly to the LLM
 - OpenAI API key never exposed to frontend
-- Invalid JSON: retry once; timeout (60s): manual retry only
-
-## Documentation
-
-- [../docs/ai-features.md](../docs/ai-features.md)
-- [../docs/ai-integration-flow.md](../docs/ai-integration-flow.md)
+- Invalid structured output: retry once; timeout: manual retry only
+- Weekly Report AI and Final Summary AI are not implemented yet

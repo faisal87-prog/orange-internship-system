@@ -68,3 +68,36 @@
     @apply text-lg font-semibold tracking-tight text-ink;
   }
 }
+
+@layer utilities {
+  @keyframes roadmap-logo-breathe {
+    0%,
+    100% {
+      transform: scale(1);
+    }
+    50% {
+      transform: scale(1.05);
+    }
+  }
+
+  @keyframes roadmap-ring-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  .animate-roadmap-logo-breathe {
+    animation: roadmap-logo-breathe 2.4s ease-in-out infinite;
+  }
+
+  .animate-roadmap-ring-spin {
+    animation: roadmap-ring-spin 1.25s linear infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .animate-roadmap-logo-breathe,
+    .animate-roadmap-ring-spin {
+      animation: none;
+    }
+  }
+}

@@ -12,6 +12,18 @@ export async function getRoadmap(id: string): Promise<Roadmap> {
   return adaptRoadmap(data);
 }
 
+export async function generateRoadmap(payload: {
+  program_id: number;
+  assignment_scope: string;
+  selected_intern_ids?: number[];
+}) {
+  const data = await apiRequest("/api/roadmaps/generate/", {
+    method: "POST",
+    body: payload,
+  });
+  return adaptRoadmap(data);
+}
+
 export async function createRoadmap(payload: {
   program: number;
   title: string;
