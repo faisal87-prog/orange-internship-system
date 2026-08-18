@@ -9,59 +9,19 @@ from typing import Any
 from apps.programs.models import InternshipProgram, InternProfile, ProgramReferenceMaterial
 from common.constants import RoadmapScope
 from services.ai.exceptions import AIPermissionError, AIValidationError
+from services.ai.reference_extractor import extract_reference_material
 
-# Conservative text preview for local txt/csv only.
-_TEXT_PREVIEW_EXTENSIONS = {".txt", ".csv"}
-_TEXT_PREVIEW_MAX_CHARS = 4000
+SKILL_LEVEL_LABELS = {
+    1: "Beginner",
+    2: "Basic",
+    3: "Intermediate",
+    4: "Advanced",
+    5: "Expert",
+}
 
 
 def _iso(value: date | None) -> str | None:
     return value.isoformat() if value else None
-
-
-def _safe_text_preview(material: ProgramReferenceMaterial) -> dict[str, Any]:
-    """Optionally include a short local text preview; never invent URL content."""
-    result: dict[str, Any] = {
-        "content_retrieved": False,
-        "content_preview": None,
-        "content_note": "Linked or binary content was not retrieved for this MVP.",
-    }
-    if not material.file:
-        if material.external_url:
-            result["content_note"] = (
-                "External URL metadata only; linked page content was not fetched."
-            )
-        return result
-
-    name = Path(material.file.name).name
-    ext = Path(name).suffix.lower()
-    if ext not in _TEXT_PREVIEW_EXTENSIONS:
-        result["content_note"] = (
-            f"Local file '{name}' is attached but binary/document content was not "
-            "extracted for this MVP."
-        )
-        return result
-
-    try:
-        with material.file.open("rb") as handle:
-            raw = handle.read(_TEXT_PREVIEW_MAX_CHARS + 1)
-        text = raw.decode("utf-8", errors="replace")
-        truncated = len(text) > _TEXT_PREVIEW_MAX_CHARS
-        preview = text[:_TEXT_PREVIEW_MAX_CHARS]
-        result.update(
-            {
-                "content_retrieved": True,
-                "content_preview": preview,
-                "content_note": (
-                    "Local text preview included (truncated)."
-                    if truncated
-                    else "Local text preview included."
-                ),
-            }
-        )
-    except Exception:  # noqa: BLE001
-        result["content_note"] = "Local file could not be read for preview."
-    return result
 
 
 def serialize_reference(material: ProgramReferenceMaterial) -> dict[str, Any]:
@@ -73,15 +33,30 @@ def serialize_reference(material: ProgramReferenceMaterial) -> dict[str, Any]:
         "file_name": Path(material.file.name).name if material.file else None,
         "external_url": material.external_url or None,
     }
-    payload.update(_safe_text_preview(material))
+    extraction = extract_reference_material(material)
+    payload.update(
+        {
+            "content_retrieved": extraction["content_retrieved"],
+            "extracted_text": extraction.get("extracted_text"),
+            # Keep content_preview alias for compatibility with prompt/generator payloads.
+            "content_preview": extraction.get("extracted_text"),
+            "content_note": extraction.get("content_note"),
+        }
+    )
     return payload
 
 
 def serialize_intern(profile: InternProfile) -> dict[str, Any]:
-    skills = [
-        {"skill_name": skill.skill_name, "skill_level": skill.skill_level}
-        for skill in profile.skills.all()
-    ]
+    skills = []
+    for skill in profile.skills.all():
+        level = int(skill.skill_level)
+        skills.append(
+            {
+                "skill_name": skill.skill_name,
+                "skill_level": level,
+                "skill_level_label": SKILL_LEVEL_LABELS.get(level, str(level)),
+            }
+        )
     return {
         "id": profile.id,
         "full_name": profile.user.full_name,
@@ -144,11 +119,33 @@ def resolve_scope_interns(
     raise AIValidationError("Invalid roadmap scope.")
 
 
+def _normalize_focus_skills(
+    *,
+    assignment_scope: str,
+    mentor_focus_skills: list[str] | None,
+) -> list[str]:
+    if assignment_scope != RoadmapScope.INDIVIDUAL:
+        return []
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for raw in mentor_focus_skills or []:
+        value = " ".join(str(raw).split()).strip()
+        if not value:
+            continue
+        key = value.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        cleaned.append(value)
+    return cleaned
+
+
 def assemble_roadmap_context(
     *,
     program: InternshipProgram,
     assignment_scope: str,
     interns: list[InternProfile],
+    mentor_focus_skills: list[str] | None = None,
 ) -> dict[str, Any]:
     """Build the canonical structured context used by both AI stages."""
     materials = [
@@ -156,10 +153,25 @@ def assemble_roadmap_context(
         for item in program.reference_materials.all().order_by("id")
     ]
     intern_payloads = [serialize_intern(intern) for intern in interns]
+    focus_skills = _normalize_focus_skills(
+        assignment_scope=assignment_scope,
+        mentor_focus_skills=mentor_focus_skills,
+    )
 
     unavailable: list[str] = []
     if not materials:
         unavailable.append("No program reference materials are available.")
+    for material in materials:
+        if material.get("has_file") and not material.get("content_retrieved"):
+            unavailable.append(
+                material.get("content_note")
+                or f"Reference '{material.get('title')}' could not be extracted."
+            )
+        if material.get("external_url") and not material.get("has_file"):
+            unavailable.append(
+                f"External URL supplied for '{material.get('title')}'; "
+                "webpage content was not extracted."
+            )
     if assignment_scope == RoadmapScope.PROGRAM and not interns:
         unavailable.append(
             "No interns are currently assigned to this program; generate a "
@@ -196,6 +208,7 @@ def assemble_roadmap_context(
         },
         "roadmap_scope": assignment_scope,
         "interns": intern_payloads,
+        "mentor_focus_skills": focus_skills,
         "reference_materials": materials,
         "constraints": {
             "duration_weeks": program.duration_weeks,
@@ -206,11 +219,14 @@ def assemble_roadmap_context(
             "require_progressive_learning": True,
             "do_not_make_hiring_decisions": True,
             "task_source_must_be_ai_generated_on_save": True,
+            "cover_every_skills_to_develop_item": True,
+            "use_reference_materials_meaningfully": True,
         },
         "unavailable_data": unavailable,
         "instructions_for_ai": {
             "use_only_supplied_context": True,
             "do_not_invent_missing_facts": True,
             "external_urls_are_metadata_only_unless_content_retrieved": True,
+            "do_not_ignore_usable_reference_materials": True,
         },
     }

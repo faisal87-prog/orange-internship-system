@@ -136,7 +136,7 @@ class RoadmapPublishSerializer(serializers.Serializer):
         return roadmap
 
 
-class RoadmapGenerateSerializer(serializers.Serializer):
+class RoadmapGeneratePromptSerializer(serializers.Serializer):
     program_id = serializers.IntegerField()
     assignment_scope = serializers.ChoiceField(choices=RoadmapScope.CHOICES)
     selected_intern_ids = serializers.ListField(
@@ -144,3 +144,16 @@ class RoadmapGenerateSerializer(serializers.Serializer):
         required=False,
         allow_empty=True,
     )
+    mentor_focus_skills = serializers.ListField(
+        child=serializers.CharField(max_length=255, allow_blank=False),
+        required=False,
+        allow_empty=True,
+    )
+
+
+class RoadmapGenerateContinueSerializer(serializers.Serializer):
+    preview_id = serializers.UUIDField()
+
+
+# Backward-compatible alias used by older imports/tests if needed.
+RoadmapGenerateSerializer = RoadmapGeneratePromptSerializer

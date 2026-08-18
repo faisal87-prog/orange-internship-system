@@ -12,14 +12,33 @@ export async function getRoadmap(id: string): Promise<Roadmap> {
   return adaptRoadmap(data);
 }
 
-export async function generateRoadmap(payload: {
+export type RoadmapPromptPreview = {
+  preview_id: string;
+  prompt_title: string;
+  final_roadmap_generation_prompt: string;
+  important_constraints: string[];
+  personalization_points: string[];
+  missing_context_notes: string[];
+  roadmap_scope: string;
+  mentor_focus_skills: string[];
+};
+
+export async function buildRoadmapPrompt(payload: {
   program_id: number;
   assignment_scope: string;
   selected_intern_ids?: number[];
+  mentor_focus_skills?: string[];
 }) {
-  const data = await apiRequest("/api/roadmaps/generate/", {
+  return apiRequest<RoadmapPromptPreview>("/api/roadmaps/generate/prompt/", {
     method: "POST",
     body: payload,
+  });
+}
+
+export async function continueRoadmapGeneration(previewId: string) {
+  const data = await apiRequest("/api/roadmaps/generate/continue/", {
+    method: "POST",
+    body: { preview_id: previewId },
   });
   return adaptRoadmap(data);
 }

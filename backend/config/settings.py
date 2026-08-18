@@ -167,6 +167,17 @@ OPENAI_ROADMAP_MODEL = os.getenv(
     "gpt-5.6-terra",
 )
 OPENAI_TIMEOUT_SECONDS = int(os.getenv("OPENAI_TIMEOUT_SECONDS", "60"))
+# Max extracted characters per reference file for AI context (no silent truncation).
+OPENAI_REFERENCE_MAX_CHARS = int(os.getenv("OPENAI_REFERENCE_MAX_CHARS", "80000"))
+# Prompt preview TTL between Call #1 and Call #2 (seconds).
+AI_ROADMAP_PREVIEW_TTL_SECONDS = int(os.getenv("AI_ROADMAP_PREVIEW_TTL_SECONDS", "1200"))
+
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "aimp-ai-preview-cache",
+    }
+}
 
 LOGGING = {
     "version": 1,

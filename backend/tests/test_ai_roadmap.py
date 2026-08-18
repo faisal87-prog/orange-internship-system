@@ -1,17 +1,19 @@
-"""AI roadmap generation tests — OpenAI is fully mocked (no real API calls)."""
+"""AI roadmap two-step generation tests — OpenAI is fully mocked (no real API calls)."""
 
 from datetime import date, timedelta
 from unittest.mock import patch
 
-from django.test import TestCase
+from django.core.cache import cache
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import TestCase, override_settings
 from rest_framework import status
 from rest_framework.test import APIClient
 
 from apps.accounts.models import MentorProfile, User
-from apps.programs.models import InternProfile, InternshipProgram
+from apps.programs.models import InternProfile, InternSkill, InternshipProgram, ProgramReferenceMaterial
 from apps.roadmaps.models import Roadmap, RoadmapWeek
 from apps.tasks.models import Task, TaskAssignment
-from common.constants import ProgramStatus, Role, RoadmapScope, RoadmapStatus, TaskSource
+from common.constants import ProgramStatus, ResourceType, Role, RoadmapScope, RoadmapStatus, TaskSource
 from services.ai.exceptions import AIInvalidOutputError
 from services.ai.schemas import (
     GeneratedRoadmap,
@@ -20,6 +22,10 @@ from services.ai.schemas import (
     GeneratedWeek,
 )
 from services.ai.validators import validate_generated_roadmap
+
+
+PROMPT_URL = "/api/roadmaps/generate/prompt/"
+CONTINUE_URL = "/api/roadmaps/generate/continue/"
 
 
 def _week_payload(week_number: int, start: date, end: date, tasks: int = 2) -> GeneratedWeek:
@@ -49,28 +55,17 @@ def _week_payload(week_number: int, start: date, end: date, tasks: int = 2) -> G
 
 
 def build_valid_roadmap(program: InternshipProgram) -> GeneratedRoadmap:
-    weeks = [
-        _week_payload(
-            week_number,
-            program.start_date + timedelta(days=(week_number - 1) * 7),
-            min(program.start_date + timedelta(days=week_number * 7 - 1), program.end_date),
-        )
-        for week_number in range(1, program.duration_weeks + 1)
-    ]
-    # Align due dates with validator week windows by re-validating through helper
     from services.ai.validators import week_boundaries
 
     aligned = []
-    for week in weeks:
+    for week_number in range(1, program.duration_weeks + 1):
         start, end = week_boundaries(
             program.start_date,
             program.end_date,
-            week.week_number,
+            week_number,
             program.duration_weeks,
         )
-        aligned.append(
-            _week_payload(week.week_number, start, end, tasks=2),
-        )
+        aligned.append(_week_payload(week_number, start, end, tasks=2))
     return GeneratedRoadmap(
         title=f"{program.title} AI Roadmap",
         summary="AI generated draft roadmap for mentor review.",
@@ -86,7 +81,8 @@ def build_prompt() -> GeneratedRoadmapPrompt:
             "Generate a progressive internship roadmap with multiple tasks per week. "
             "Cover every skills_to_develop item. "
             "For PROGRAM scope do not invent named assignees. "
-            "Do not put DRAFT in the title."
+            "Do not put DRAFT in the title. "
+            "Use Django REST Framework from the supplied reference."
         ),
         important_constraints=[
             "Respect duration_weeks",
@@ -100,8 +96,9 @@ def build_prompt() -> GeneratedRoadmapPrompt:
     )
 
 
-class AIRoadmapGenerationTests(TestCase):
+class AIRoadmapTwoStepTests(TestCase):
     def setUp(self):
+        cache.clear()
         self.client = APIClient()
         self.admin = User.objects.create_user(
             email="admin@ai.test",
@@ -143,7 +140,7 @@ class AIRoadmapGenerationTests(TestCase):
             weekly_hours=20,
             maximum_interns=3,
             skills_needed=["Python"],
-            skills_to_develop=["APIs"],
+            skills_to_develop=["APIs", "Python Development", "AI Integrations"],
             goals="Ship features",
             expected_outcome="Independent contributor",
             final_project="Capstone app",
@@ -164,6 +161,12 @@ class AIRoadmapGenerationTests(TestCase):
             learning_goals="Learn Django",
             major="CS",
             university="Test U",
+        )
+        InternSkill.objects.create(
+            intern=self.intern, skill_name="Python", skill_level=2
+        )
+        InternSkill.objects.create(
+            intern=self.intern, skill_name="APIs", skill_level=5
         )
         self.intern_user_b = User.objects.create_user(
             email="intern2@ai.test",
@@ -194,76 +197,246 @@ class AIRoadmapGenerationTests(TestCase):
     def auth(self, user):
         self.client.force_authenticate(user=user)
 
-    def _mock_success(self, mock_parse):
+    def _mock_prompt_only(self, mock_parse):
+        prompt = build_prompt()
+
+        def side_effect(*, model, input_messages, text_format):
+            if text_format is GeneratedRoadmapPrompt:
+                return prompt
+            raise AssertionError("Call #2 must not run during prompt preview")
+
+        mock_parse.side_effect = side_effect
+        return prompt
+
+    def _mock_full(self, mock_parse):
         prompt = build_prompt()
         roadmap = build_valid_roadmap(self.program)
+        call_log = {"generator_payloads": []}
 
         def side_effect(*, model, input_messages, text_format):
             if text_format is GeneratedRoadmapPrompt:
                 return prompt
             if text_format is GeneratedRoadmap:
+                call_log["generator_payloads"].append(input_messages)
                 return roadmap
             raise AssertionError(f"Unexpected schema {text_format}")
 
         mock_parse.side_effect = side_effect
+        return prompt, roadmap, call_log
+
+    def _build_prompt(self, **extra):
+        payload = {
+            "program_id": self.program.id,
+            "assignment_scope": RoadmapScope.PROGRAM,
+            "selected_intern_ids": [],
+            **extra,
+        }
+        return self.client.post(PROMPT_URL, payload, format="json")
 
     @patch("services.ai.client.parse_structured")
-    def test_owning_mentor_can_generate_program_scope(self, mock_parse):
-        self._mock_success(mock_parse)
+    def test_step1_invokes_prompt_builder_only_and_returns_preview(self, mock_parse):
+        self._mock_prompt_only(mock_parse)
         self.auth(self.mentor)
-        response = self.client.post(
-            "/api/roadmaps/generate/",
-            {
-                "program_id": self.program.id,
-                "assignment_scope": RoadmapScope.PROGRAM,
-                "selected_intern_ids": [],
-            },
-            format="json",
+        before = Roadmap.objects.count()
+        response = self._build_prompt()
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn("preview_id", response.data)
+        self.assertIn("final_roadmap_generation_prompt", response.data)
+        self.assertEqual(response.data["prompt_title"], "Custom roadmap prompt")
+        self.assertEqual(Roadmap.objects.count(), before)
+        self.assertEqual(TaskAssignment.objects.count(), 0)
+        self.assertEqual(mock_parse.call_count, 1)
+        self.assertIs(mock_parse.call_args.kwargs["text_format"], GeneratedRoadmapPrompt)
+
+        final_prompt = response.data["final_roadmap_generation_prompt"]
+        self.assertIn("Entire Program", final_prompt)
+        self.assertIn("APIs", final_prompt)
+        self.assertIn("Python Development", final_prompt)
+        self.assertIn("AI Integrations", final_prompt)
+        self.assertIn("Ship features", final_prompt)
+        self.assertIn("Independent contributor", final_prompt)
+        self.assertIn("Capstone app", final_prompt)
+        self.assertIn("named leads", final_prompt.lower())
+        self.assertIn("EVERY Program Skill to Develop", final_prompt)
+
+    @patch("services.ai.client.parse_structured")
+    def test_continue_uses_exact_final_prompt_and_creates_draft(self, mock_parse):
+        _prompt, _roadmap, call_log = self._mock_full(mock_parse)
+        self.auth(self.mentor)
+        preview = self._build_prompt()
+        self.assertEqual(preview.status_code, status.HTTP_200_OK)
+        preview_id = preview.data["preview_id"]
+        final_prompt = preview.data["final_roadmap_generation_prompt"]
+        self.assertEqual(Roadmap.objects.count(), 0)
+
+        continue_response = self.client.post(
+            CONTINUE_URL, {"preview_id": preview_id}, format="json"
         )
-        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-        self.assertTrue(response.data["generated_by_ai"])
-        self.assertEqual(response.data["status"], RoadmapStatus.DRAFT)
-        self.assertEqual(response.data["number_of_weeks"], 4)
-        self.assertEqual(len(response.data["weeks"]), 4)
-        roadmap = Roadmap.objects.get(id=response.data["id"])
-        self.assertEqual(roadmap.weeks.count(), 4)
+        self.assertEqual(continue_response.status_code, status.HTTP_201_CREATED)
+        self.assertTrue(continue_response.data["generated_by_ai"])
+        self.assertEqual(continue_response.data["status"], RoadmapStatus.DRAFT)
+        self.assertEqual(continue_response.data["number_of_weeks"], 4)
+
+        roadmap = Roadmap.objects.get(id=continue_response.data["id"])
         tasks = Task.objects.filter(roadmap_week__roadmap=roadmap)
         self.assertEqual(tasks.count(), 8)
-        self.assertTrue(tasks.filter(source=TaskSource.AI_GENERATED).count() == 8)
+        self.assertEqual(tasks.filter(source=TaskSource.AI_GENERATED).count(), 8)
         self.assertEqual(TaskAssignment.objects.filter(task__in=tasks).count(), 0)
-        self.assertGreaterEqual(mock_parse.call_count, 2)
+
+        # Prompt Builder once + Roadmap Generator once (success path)
+        self.assertEqual(mock_parse.call_count, 2)
+        generator_messages = call_log["generator_payloads"][0]
+        import json
+
+        user_payload = json.loads(generator_messages[1]["content"])
+        self.assertEqual(
+            user_payload["final_roadmap_generation_prompt"],
+            final_prompt,
+        )
+        # Character-for-character reuse of the previewed Final Prompt.
+        self.assertEqual(
+            len(user_payload["final_roadmap_generation_prompt"]),
+            len(final_prompt),
+        )
 
     @patch("services.ai.client.parse_structured")
-    def test_group_and_individual_scopes(self, mock_parse):
-        self._mock_success(mock_parse)
+    def test_group_and_individual_continue_flow(self, mock_parse):
+        self._mock_full(mock_parse)
         self.auth(self.mentor)
 
+        group_preview = self._build_prompt(
+            assignment_scope=RoadmapScope.GROUP,
+            selected_intern_ids=[self.intern.id, self.intern_b.id],
+        )
+        self.assertEqual(group_preview.status_code, status.HTTP_200_OK)
         group = self.client.post(
-            "/api/roadmaps/generate/",
-            {
-                "program_id": self.program.id,
-                "assignment_scope": RoadmapScope.GROUP,
-                "selected_intern_ids": [self.intern.id, self.intern_b.id],
-            },
+            CONTINUE_URL,
+            {"preview_id": group_preview.data["preview_id"]},
             format="json",
         )
         self.assertEqual(group.status_code, status.HTTP_201_CREATED)
         roadmap = Roadmap.objects.get(id=group.data["id"])
-        self.assertEqual(set(roadmap.assigned_interns.values_list("id", flat=True)), {
-            self.intern.id,
-            self.intern_b.id,
-        })
+        self.assertEqual(
+            set(roadmap.assigned_interns.values_list("id", flat=True)),
+            {self.intern.id, self.intern_b.id},
+        )
+
+        individual_preview = self._build_prompt(
+            assignment_scope=RoadmapScope.INDIVIDUAL,
+            selected_intern_ids=[self.intern.id],
+            mentor_focus_skills=["APIs", "Prompt Engineering"],
+        )
+        self.assertEqual(individual_preview.status_code, status.HTTP_200_OK)
+        final_prompt = individual_preview.data["final_roadmap_generation_prompt"]
+        self.assertIn("Intern AI", final_prompt)
+        self.assertIn("Python: level 2 (Basic)", final_prompt)
+        self.assertIn("APIs: level 5 (Expert)", final_prompt)
+        self.assertIn("Prompt Engineering", final_prompt)
+        self.assertIn("MENTOR-REQUESTED SKILLS TO FOCUS ON", final_prompt)
+        self.assertEqual(
+            individual_preview.data["mentor_focus_skills"],
+            ["APIs", "Prompt Engineering"],
+        )
+        # Custom focus skill must not mutate Program.skills_to_develop
+        self.program.refresh_from_db()
+        self.assertNotIn("Prompt Engineering", self.program.skills_to_develop)
 
         individual = self.client.post(
-            "/api/roadmaps/generate/",
-            {
-                "program_id": self.program.id,
-                "assignment_scope": RoadmapScope.INDIVIDUAL,
-                "selected_intern_ids": [self.intern.id],
-            },
+            CONTINUE_URL,
+            {"preview_id": individual_preview.data["preview_id"]},
             format="json",
         )
         self.assertEqual(individual.status_code, status.HTTP_201_CREATED)
+
+    @patch("services.ai.client.parse_structured")
+    def test_reference_txt_reaches_both_calls(self, mock_parse):
+        _prompt, _roadmap, call_log = self._mock_full(mock_parse)
+        reference_body = (
+            "Django REST Framework must be used for all API endpoints.\n"
+            "Acceptance: each endpoint needs authenticated JWT access.\n"
+        )
+        ProgramReferenceMaterial.objects.create(
+            program=self.program,
+            title="Technical Requirements",
+            resource_type=ResourceType.DOC,
+            file=SimpleUploadedFile(
+                "technical_requirements.txt",
+                reference_body.encode("utf-8"),
+                content_type="text/plain",
+            ),
+        )
+        self.auth(self.mentor)
+        preview = self._build_prompt()
+        self.assertEqual(preview.status_code, status.HTTP_200_OK)
+        final_prompt = preview.data["final_roadmap_generation_prompt"]
+        self.assertIn("Technical Requirements", final_prompt)
+        self.assertIn("Django REST Framework must be used", final_prompt)
+        self.assertIn("REFERENCE MATERIAL", final_prompt)
+
+        # Call #1 received reference in user payload
+        prompt_call = mock_parse.call_args_list[0]
+        import json
+
+        first_content = prompt_call.kwargs["input_messages"][1]["content"]
+        self.assertIn("Django REST Framework must be used", first_content)
+        self.assertIn("Technical Requirements", first_content)
+
+        continue_response = self.client.post(
+            CONTINUE_URL,
+            {"preview_id": preview.data["preview_id"]},
+            format="json",
+        )
+        self.assertEqual(continue_response.status_code, status.HTTP_201_CREATED)
+        generator_payload = json.loads(call_log["generator_payloads"][0][1]["content"])
+        self.assertEqual(
+            generator_payload["final_roadmap_generation_prompt"], final_prompt
+        )
+        canon_refs = generator_payload["canonical_context"]["reference_materials"]
+        self.assertTrue(canon_refs[0]["content_retrieved"])
+        self.assertIn(
+            "Django REST Framework must be used",
+            canon_refs[0]["extracted_text"],
+        )
+
+    @patch("services.ai.client.parse_structured")
+    def test_url_only_reference_is_not_marked_extracted(self, mock_parse):
+        self._mock_prompt_only(mock_parse)
+        ProgramReferenceMaterial.objects.create(
+            program=self.program,
+            title="External Spec",
+            resource_type=ResourceType.LINK,
+            external_url="https://example.com/spec",
+        )
+        self.auth(self.mentor)
+        preview = self._build_prompt()
+        self.assertEqual(preview.status_code, status.HTTP_200_OK)
+        notes = " ".join(preview.data["missing_context_notes"])
+        self.assertIn("webpage content was not extracted", notes.lower())
+        self.assertIn(
+            "webpage content was not extracted",
+            preview.data["final_roadmap_generation_prompt"].lower(),
+        )
+
+    @override_settings(OPENAI_REFERENCE_MAX_CHARS=50)
+    @patch("services.ai.client.parse_structured")
+    def test_oversized_reference_returns_clear_error(self, mock_parse):
+        ProgramReferenceMaterial.objects.create(
+            program=self.program,
+            title="Huge Spec",
+            resource_type=ResourceType.DOC,
+            file=SimpleUploadedFile(
+                "huge.txt",
+                ("x" * 200).encode("utf-8"),
+                content_type="text/plain",
+            ),
+        )
+        self.auth(self.mentor)
+        before = Roadmap.objects.count()
+        preview = self._build_prompt()
+        self.assertEqual(preview.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("too large", preview.data["detail"].lower())
+        self.assertEqual(Roadmap.objects.count(), before)
+        mock_parse.assert_not_called()
 
     def test_permissions_reject_other_roles_and_mentors(self):
         payload = {
@@ -273,24 +446,24 @@ class AIRoadmapGenerationTests(TestCase):
         }
         self.auth(self.admin)
         self.assertEqual(
-            self.client.post("/api/roadmaps/generate/", payload, format="json").status_code,
+            self.client.post(PROMPT_URL, payload, format="json").status_code,
             status.HTTP_403_FORBIDDEN,
         )
         self.auth(self.intern_user)
         self.assertEqual(
-            self.client.post("/api/roadmaps/generate/", payload, format="json").status_code,
+            self.client.post(PROMPT_URL, payload, format="json").status_code,
             status.HTTP_403_FORBIDDEN,
         )
         self.auth(self.other_mentor)
         self.assertEqual(
-            self.client.post("/api/roadmaps/generate/", payload, format="json").status_code,
+            self.client.post(PROMPT_URL, payload, format="json").status_code,
             status.HTTP_403_FORBIDDEN,
         )
 
     def test_invalid_intern_selection_rejected(self):
         self.auth(self.mentor)
         response = self.client.post(
-            "/api/roadmaps/generate/",
+            PROMPT_URL,
             {
                 "program_id": self.program.id,
                 "assignment_scope": RoadmapScope.GROUP,
@@ -301,7 +474,7 @@ class AIRoadmapGenerationTests(TestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
         response = self.client.post(
-            "/api/roadmaps/generate/",
+            PROMPT_URL,
             {
                 "program_id": self.program.id,
                 "assignment_scope": RoadmapScope.INDIVIDUAL,
@@ -312,21 +485,32 @@ class AIRoadmapGenerationTests(TestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
     @patch("services.ai.client.parse_structured")
+    def test_preview_ownership_and_expiry(self, mock_parse):
+        self._mock_prompt_only(mock_parse)
+        self.auth(self.mentor)
+        preview = self._build_prompt()
+        preview_id = preview.data["preview_id"]
+
+        self.auth(self.other_mentor)
+        forbidden = self.client.post(
+            CONTINUE_URL, {"preview_id": preview_id}, format="json"
+        )
+        self.assertEqual(forbidden.status_code, status.HTTP_403_FORBIDDEN)
+
+        cache.clear()
+        self.auth(self.mentor)
+        expired = self.client.post(
+            CONTINUE_URL, {"preview_id": preview_id}, format="json"
+        )
+        self.assertEqual(expired.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("expired", expired.data["detail"].lower())
+
+    @patch("services.ai.client.parse_structured")
     def test_prompt_builder_retries_once_then_fails(self, mock_parse):
-        mock_parse.side_effect = [
-            AIInvalidOutputError(),
-            AIInvalidOutputError(),
-        ]
+        mock_parse.side_effect = [AIInvalidOutputError(), AIInvalidOutputError()]
         self.auth(self.mentor)
         before = Roadmap.objects.count()
-        response = self.client.post(
-            "/api/roadmaps/generate/",
-            {
-                "program_id": self.program.id,
-                "assignment_scope": RoadmapScope.PROGRAM,
-            },
-            format="json",
-        )
+        response = self._build_prompt()
         self.assertEqual(response.status_code, status.HTTP_503_SERVICE_UNAVAILABLE)
         self.assertEqual(Roadmap.objects.count(), before)
         self.assertEqual(mock_parse.call_count, 2)
@@ -342,13 +526,11 @@ class AIRoadmapGenerationTests(TestCase):
 
         mock_parse.side_effect = side_effect
         self.auth(self.mentor)
+        preview = self._build_prompt()
         before = Roadmap.objects.count()
         response = self.client.post(
-            "/api/roadmaps/generate/",
-            {
-                "program_id": self.program.id,
-                "assignment_scope": RoadmapScope.PROGRAM,
-            },
+            CONTINUE_URL,
+            {"preview_id": preview.data["preview_id"]},
             format="json",
         )
         self.assertEqual(response.status_code, status.HTTP_503_SERVICE_UNAVAILABLE)
@@ -358,8 +540,9 @@ class AIRoadmapGenerationTests(TestCase):
 
     @patch("services.ai.client.parse_structured")
     def test_persistence_failure_rolls_back(self, mock_parse):
-        self._mock_success(mock_parse)
+        self._mock_full(mock_parse)
         self.auth(self.mentor)
+        preview = self._build_prompt()
         before_roadmaps = Roadmap.objects.count()
         before_weeks = RoadmapWeek.objects.count()
         before_tasks = Task.objects.count()
@@ -368,11 +551,8 @@ class AIRoadmapGenerationTests(TestCase):
             side_effect=RuntimeError("db boom"),
         ):
             response = self.client.post(
-                "/api/roadmaps/generate/",
-                {
-                    "program_id": self.program.id,
-                    "assignment_scope": RoadmapScope.PROGRAM,
-                },
+                CONTINUE_URL,
+                {"preview_id": preview.data["preview_id"]},
                 format="json",
             )
         self.assertEqual(response.status_code, status.HTTP_503_SERVICE_UNAVAILABLE)
@@ -466,3 +646,18 @@ class AIRoadmapGenerationTests(TestCase):
         self.assertIn("named individual interns", PROMPT_BUILDER_SYSTEM)
         self.assertIn("DRAFT", PROMPT_BUILDER_SYSTEM)
         self.assertIn("unsupported technologies", PROMPT_BUILDER_SYSTEM)
+
+    def test_old_single_generate_endpoint_removed(self):
+        self.auth(self.mentor)
+        response = self.client.post(
+            "/api/roadmaps/generate/",
+            {
+                "program_id": self.program.id,
+                "assignment_scope": RoadmapScope.PROGRAM,
+            },
+            format="json",
+        )
+        self.assertIn(
+            response.status_code,
+            {status.HTTP_404_NOT_FOUND, status.HTTP_405_METHOD_NOT_ALLOWED},
+        )

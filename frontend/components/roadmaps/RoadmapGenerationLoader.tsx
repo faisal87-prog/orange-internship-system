@@ -3,22 +3,31 @@
 import Image from "next/image";
 import { useEffect, useState } from "react";
 
-const STATUS_MESSAGES = [
+const DEFAULT_STATUS_MESSAGES = [
   "Preparing program context...",
   "Building the AI roadmap prompt...",
-  "Generating weeks and tasks...",
-  "Finalizing your draft roadmap...",
+  "Analyzing references and personalization...",
+  "Finalizing the prompt package...",
 ];
 
-export function RoadmapGenerationLoader() {
+export function RoadmapGenerationLoader({
+  title = "Generating your internship roadmap...",
+  description = "AI is analyzing the program, learning goals, skills, and internship structure. This may take a moment.",
+  statusMessages = DEFAULT_STATUS_MESSAGES,
+}: {
+  title?: string;
+  description?: string;
+  statusMessages?: string[];
+}) {
   const [statusIndex, setStatusIndex] = useState(0);
+  const messages = statusMessages.length ? statusMessages : DEFAULT_STATUS_MESSAGES;
 
   useEffect(() => {
     const timer = window.setInterval(() => {
-      setStatusIndex((current) => (current + 1) % STATUS_MESSAGES.length);
+      setStatusIndex((current) => (current + 1) % messages.length);
     }, 4500);
     return () => window.clearInterval(timer);
-  }, []);
+  }, [messages.length]);
 
   return (
     <div
@@ -45,13 +54,10 @@ export function RoadmapGenerationLoader() {
       </div>
 
       <h2 className="mt-8 text-xl font-semibold tracking-tight text-ink sm:text-2xl">
-        Generating your internship roadmap...
+        {title}
       </h2>
-      <p className="mt-3 max-w-md text-sm text-ink-muted sm:text-base">
-        AI is analyzing the program, learning goals, skills, and internship structure. This may
-        take a moment.
-      </p>
-      <p className="mt-5 text-sm font-medium text-brand-dark">{STATUS_MESSAGES[statusIndex]}</p>
+      <p className="mt-3 max-w-md text-sm text-ink-muted sm:text-base">{description}</p>
+      <p className="mt-5 text-sm font-medium text-brand-dark">{messages[statusIndex]}</p>
     </div>
   );
 }

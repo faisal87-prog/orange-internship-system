@@ -7,14 +7,19 @@ from rest_framework.response import Response
 
 from apps.roadmaps.models import Roadmap, RoadmapWeek
 from apps.roadmaps.serializers import (
-    RoadmapGenerateSerializer,
+    RoadmapGenerateContinueSerializer,
+    RoadmapGeneratePromptSerializer,
     RoadmapPublishSerializer,
     RoadmapSerializer,
     RoadmapWeekSerializer,
 )
 from common.constants import Role, RoadmapScope, RoadmapStatus
 from permissions.roles import IsMentor
-from services.ai.service import generate_ai_roadmap, to_api_error_payload
+from services.ai.service import (
+    build_ai_roadmap_prompt_preview,
+    continue_ai_roadmap_generation,
+    to_api_error_payload,
+)
 
 
 class RoadmapViewSet(viewsets.ModelViewSet):
@@ -48,7 +53,8 @@ class RoadmapViewSet(viewsets.ModelViewSet):
             "partial_update",
             "destroy",
             "publish",
-            "generate",
+            "generate_prompt",
+            "generate_continue",
         }:
             return [IsMentor()]
         return [IsAuthenticated()]
@@ -59,12 +65,12 @@ class RoadmapViewSet(viewsets.ModelViewSet):
             raise PermissionDenied("Not your program.")
         serializer.save()
 
-    @action(detail=False, methods=["post"], url_path="generate")
-    def generate(self, request):
-        serializer = RoadmapGenerateSerializer(data=request.data)
+    @action(detail=False, methods=["post"], url_path="generate/prompt")
+    def generate_prompt(self, request):
+        serializer = RoadmapGeneratePromptSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         try:
-            roadmap = generate_ai_roadmap(
+            preview = build_ai_roadmap_prompt_preview(
                 mentor=request.user,
                 program_id=serializer.validated_data["program_id"],
                 assignment_scope=serializer.validated_data["assignment_scope"],
@@ -72,6 +78,24 @@ class RoadmapViewSet(viewsets.ModelViewSet):
                     "selected_intern_ids"
                 )
                 or [],
+                mentor_focus_skills=serializer.validated_data.get(
+                    "mentor_focus_skills"
+                )
+                or [],
+            )
+        except Exception as exc:  # noqa: BLE001 - mapped to safe API errors
+            status_code, payload = to_api_error_payload(exc)
+            return Response(payload, status=status_code)
+        return Response(preview, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["post"], url_path="generate/continue")
+    def generate_continue(self, request):
+        serializer = RoadmapGenerateContinueSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            roadmap = continue_ai_roadmap_generation(
+                mentor=request.user,
+                preview_id=str(serializer.validated_data["preview_id"]),
             )
         except Exception as exc:  # noqa: BLE001 - mapped to safe API errors
             status_code, payload = to_api_error_payload(exc)

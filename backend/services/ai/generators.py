@@ -8,7 +8,7 @@ from typing import Any
 from services.ai import client as openai_client
 from services.ai import config
 from services.ai.exceptions import AIInvalidOutputError
-from services.ai.schemas import GeneratedRoadmap, GeneratedRoadmapPrompt
+from services.ai.schemas import GeneratedRoadmap
 from services.ai.validators import validate_generated_roadmap
 
 ROADMAP_GENERATOR_SYSTEM = """
@@ -17,46 +17,31 @@ Generate a complete structured learning roadmap for mentors to review.
 The application will save it as a Draft separately — do NOT put DRAFT/PUBLISHED/
 ARCHIVED in the roadmap title.
 
-Use only the provided canonical context and the customized generation prompt.
+Follow the Final Roadmap Generation Prompt exactly.
+Also use the canonical structured context (including extracted reference material)
+as authoritative source data.
 Do not invent unavailable facts or unsupported technologies.
 Do not create scores, mentor feedback, or task assignment statuses.
 Use difficulty values EASY, MEDIUM, or HARD only.
 Use requirement_type values REQUIRED or OPTIONAL only.
 Produce multiple meaningful tasks for each week (at least one; prefer several).
 Respect program start/end dates and duration_weeks exactly.
-
-Before returning, verify:
-- Every skills_to_develop item is meaningfully covered in objectives/skills/tasks
-- Alignment with Goals, Expected Outcome, and progression toward Final Project
-- Enough concrete technical implementation work when the context supports it
-- No hallucinated tech stack items
-- Title has no lifecycle/status words
-- If roadmap_scope is PROGRAM: no named individual assignees/leads in task text
-- No obviously duplicate tasks
-- Realistic weekly workload near weekly_hours
 """.strip()
 
 
 def generate_roadmap_structure(
     *,
     context: dict[str, Any],
-    generated_prompt: GeneratedRoadmapPrompt,
+    final_roadmap_generation_prompt: str,
 ) -> GeneratedRoadmap:
     """
-    Call OpenAI to generate the roadmap JSON.
+    Call OpenAI to generate the roadmap JSON using the exact previewed Final Prompt.
 
     Retries once on invalid structured/business output using the same prompt.
     """
     user_payload = {
-        "customized_generation_prompt": generated_prompt.roadmap_generation_prompt,
-        "prompt_title": generated_prompt.prompt_title,
-        "important_constraints": generated_prompt.important_constraints,
-        "personalization_points": generated_prompt.personalization_points,
-        "missing_context_notes": generated_prompt.missing_context_notes,
+        "final_roadmap_generation_prompt": final_roadmap_generation_prompt,
         "canonical_context": context,
-        "mandatory_skills_to_cover": context.get("program", {}).get("skills_to_develop")
-        or [],
-        "roadmap_scope": context.get("roadmap_scope"),
         "output_requirements": {
             "roadmap_fields": ["title", "summary", "number_of_weeks", "weeks"],
             "week_fields": [
