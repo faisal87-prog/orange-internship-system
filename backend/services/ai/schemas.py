@@ -40,3 +40,20 @@ class GeneratedRoadmap(BaseModel):
     summary: str
     number_of_weeks: int
     weeks: list[GeneratedWeek]
+
+
+class GeneratedWeeklyReportPrompt(BaseModel):
+    prompt_title: str
+    weekly_report_generation_prompt: str
+    important_constraints: list[str] = Field(default_factory=list)
+    personalization_points: list[str] = Field(default_factory=list)
+    missing_context_notes: list[str] = Field(default_factory=list)
+
+
+class GeneratedWeeklyReport(BaseModel):
+    performance_summary: str
+    achievements: str
+    learning_progress: str
+    productivity_analysis: str
+    mentor_focus_suggestions: str
+    recommended_next_focus: str

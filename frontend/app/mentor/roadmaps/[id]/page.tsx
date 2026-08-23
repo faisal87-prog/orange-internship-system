@@ -8,10 +8,12 @@ import { RoadmapReadOnlyView } from "@/components/roadmaps/RoadmapWeekView";
 import { ErrorState, LoadingState } from "@/components/ui/AsyncState";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { StatusBadge } from "@/components/ui/StatusBadge";
+import { listInternProfiles } from "@/lib/api/accounts";
 import { getErrorMessage } from "@/lib/api/errors";
 import { getProgram } from "@/lib/api/programs";
 import { getRoadmap, publishRoadmap } from "@/lib/api/roadmaps";
 import { roadmapScopeLabel } from "@/lib/labels";
+import { fullName } from "@/lib/names";
 import type { InternshipProgram, Roadmap } from "@/types";
 
 export default function RoadmapDetailPage() {
@@ -20,6 +22,7 @@ export default function RoadmapDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [roadmap, setRoadmap] = useState<Roadmap | null>(null);
   const [program, setProgram] = useState<InternshipProgram | null>(null);
+  const [internNames, setInternNames] = useState<Record<string, string>>({});
   const [message, setMessage] = useState("");
   const [publishing, setPublishing] = useState(false);
 
@@ -29,11 +32,18 @@ export default function RoadmapDetailPage() {
     try {
       const map = await getRoadmap(params.id);
       setRoadmap(map);
-      try {
-        setProgram(await getProgram(map.programId));
-      } catch {
-        setProgram(null);
-      }
+      const [programData, interns] = await Promise.all([
+        getProgram(map.programId).catch(() => null),
+        listInternProfiles().catch(() => []),
+      ]);
+      setProgram(programData);
+      setInternNames(
+        Object.fromEntries(
+          interns
+            .filter((ip) => ip.programId === map.programId)
+            .map((ip) => [ip.id, fullName(ip.user) || ip.id]),
+        ),
+      );
     } catch (err) {
       setError(getErrorMessage(err, "Could not load roadmap."));
     } finally {
@@ -111,7 +121,7 @@ export default function RoadmapDetailPage() {
         </section>
       ) : null}
 
-      <RoadmapReadOnlyView roadmap={roadmap} />
+      <RoadmapReadOnlyView roadmap={roadmap} internNames={internNames} />
     </div>
   );
 }

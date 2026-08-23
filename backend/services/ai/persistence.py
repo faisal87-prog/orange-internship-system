@@ -1,4 +1,4 @@
-"""Persist validated AI roadmaps as DRAFT records (no TaskAssignments)."""
+"""Persist validated AI roadmaps as DRAFT records with intended assignees."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from django.db import transaction
 
 from apps.programs.models import InternshipProgram, InternProfile
 from apps.roadmaps.models import Roadmap, RoadmapWeek
-from apps.tasks.models import Task
+from apps.tasks.models import Task, TaskAssignment
 from common.constants import RoadmapStatus, TaskSource
 from services.ai.exceptions import AIPersistenceError
 from services.ai.schemas import GeneratedRoadmap
@@ -34,7 +34,8 @@ def persist_generated_roadmap(
             status=RoadmapStatus.DRAFT,
             generated_by_ai=True,
         )
-        if assignment_scope != "PROGRAM" and interns:
+        # Scope-determined intended assignees (PROGRAM = all current program interns).
+        if interns:
             roadmap.assigned_interns.set(interns)
 
         for week_data in sorted(generated.weeks, key=lambda item: item.week_number):
@@ -56,7 +57,7 @@ def persist_generated_roadmap(
                 display_order=week_data.week_number,
             )
             for index, task_data in enumerate(week_data.tasks):
-                Task.objects.create(
+                task = Task.objects.create(
                     roadmap_week=week,
                     program=program,
                     created_by=created_by,
@@ -71,9 +72,16 @@ def persist_generated_roadmap(
                     source=TaskSource.AI_GENERATED,
                     display_order=index,
                 )
+                # Deterministic assignees from roadmap scope — not from AI text.
+                for intern in interns:
+                    TaskAssignment.objects.create(task=task, intern=intern)
         return (
             Roadmap.objects.select_related("program", "approved_by")
-            .prefetch_related("weeks__tasks__resources", "assigned_interns")
+            .prefetch_related(
+                "weeks__tasks__resources",
+                "weeks__tasks__assignments",
+                "assigned_interns",
+            )
             .get(pk=roadmap.pk)
         )
     except Exception as exc:  # noqa: BLE001

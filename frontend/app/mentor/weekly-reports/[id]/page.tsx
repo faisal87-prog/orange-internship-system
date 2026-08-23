@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { ErrorState, LoadingState } from "@/components/ui/AsyncState";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -22,6 +22,7 @@ type ReportDetail = WeeklyReport & { overallWeeklyScore?: number | null };
 
 export default function WeeklyReportDetailPage() {
   const params = useParams<{ id: string }>();
+  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [report, setReport] = useState<ReportDetail | null>(null);
@@ -31,6 +32,7 @@ export default function WeeklyReportDetailPage() {
   const [achievements, setAchievements] = useState("");
   const [learningProgress, setLearningProgress] = useState("");
   const [productivityAnalysis, setProductivityAnalysis] = useState("");
+  const [mentorFocusSuggestions, setMentorFocusSuggestions] = useState("");
   const [recommendedFocusNextWeek, setRecommendedFocusNextWeek] = useState("");
   const [mentorNotes, setMentorNotes] = useState("");
   const [overallScore, setOverallScore] = useState<number | null | undefined>(null);
@@ -51,6 +53,7 @@ export default function WeeklyReportDetailPage() {
       setAchievements((detail.content.achievements || []).join("\n"));
       setLearningProgress(detail.content.learningProgress ?? "");
       setProductivityAnalysis(detail.content.productivityAnalysis ?? "");
+      setMentorFocusSuggestions((detail.content.mentorFocusSuggestions || []).join("\n"));
       setRecommendedFocusNextWeek(detail.content.recommendedFocusNextWeek ?? "");
       setMentorNotes(detail.additionalMentorNotes ?? "");
       setOverallScore(detail.overallWeeklyScore);
@@ -69,22 +72,30 @@ export default function WeeklyReportDetailPage() {
 
   const editable = status === "DRAFT";
 
+  function payloadFromForm() {
+    return {
+      performance_summary: summary,
+      achievements: achievements
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean),
+      learning_progress: learningProgress,
+      productivity_analysis: productivityAnalysis,
+      mentor_focus_suggestions: mentorFocusSuggestions
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean),
+      recommended_next_focus: recommendedFocusNextWeek,
+      additional_mentor_notes: mentorNotes,
+    };
+  }
+
   async function saveEdits() {
     if (!report) return;
     setBusy(true);
     setMessage("");
     try {
-      const updated = await updateWeeklyReport(report.id, {
-        performance_summary: summary,
-        achievements: achievements
-          .split("\n")
-          .map((line) => line.trim())
-          .filter(Boolean),
-        learning_progress: learningProgress,
-        productivity_analysis: productivityAnalysis,
-        recommended_next_focus: recommendedFocusNextWeek,
-        additional_mentor_notes: mentorNotes,
-      });
+      const updated = await updateWeeklyReport(report.id, payloadFromForm());
       setReport(updated);
       setOverallScore(updated.overallWeeklyScore);
       setStatus(updated.status);
@@ -101,17 +112,7 @@ export default function WeeklyReportDetailPage() {
     setBusy(true);
     setMessage("");
     try {
-      await updateWeeklyReport(report.id, {
-        performance_summary: summary,
-        achievements: achievements
-          .split("\n")
-          .map((line) => line.trim())
-          .filter(Boolean),
-        learning_progress: learningProgress,
-        productivity_analysis: productivityAnalysis,
-        recommended_next_focus: recommendedFocusNextWeek,
-        additional_mentor_notes: mentorNotes,
-      });
+      await updateWeeklyReport(report.id, payloadFromForm());
       const approved = await approveWeeklyReport(report.id);
       setReport({ ...report, ...approved });
       setStatus(approved.status);
@@ -137,6 +138,18 @@ export default function WeeklyReportDetailPage() {
     }
   }
 
+  function onRegenerate() {
+    if (!report || status !== "DRAFT") {
+      setMessage("Only draft weekly reports can be regenerated.");
+      return;
+    }
+    const query = new URLSearchParams({
+      programId: report.programId,
+      internId: report.internProfileId,
+    });
+    router.push(`/mentor/weekly-reports/generate?${query.toString()}`);
+  }
+
   if (loading) return <LoadingState label="Loading report…" />;
   if (error) return <ErrorState message={error} onRetry={() => void load()} />;
   if (!report) return <p>Report not found.</p>;
@@ -148,7 +161,7 @@ export default function WeeklyReportDetailPage() {
         description={internName}
         actions={
           <>
-            {status === "APPROVED" ? (
+            {status === "APPROVED" || status === "DRAFT" ? (
               <button
                 type="button"
                 className="btn-primary"
@@ -170,13 +183,11 @@ export default function WeeklyReportDetailPage() {
             Edit mode
           </span>
         ) : null}
-        <button
-          type="button"
-          className="btn-secondary"
-          onClick={() => setMessage("AI generation is not connected yet.")}
-        >
-          Regenerate
-        </button>
+        {editable ? (
+          <button type="button" className="btn-secondary" onClick={onRegenerate}>
+            Regenerate
+          </button>
+        ) : null}
         {editable ? (
           <>
             <button
@@ -263,6 +274,19 @@ export default function WeeklyReportDetailPage() {
               rows={3}
               value={productivityAnalysis}
               onChange={(e) => setProductivityAnalysis(e.target.value)}
+              disabled={!editable}
+            />
+          </div>
+          <div>
+            <label className="label" htmlFor="mentorFocus">
+              Mentor focus suggestions (one per line)
+            </label>
+            <textarea
+              id="mentorFocus"
+              className="input"
+              rows={3}
+              value={mentorFocusSuggestions}
+              onChange={(e) => setMentorFocusSuggestions(e.target.value)}
               disabled={!editable}
             />
           </div>

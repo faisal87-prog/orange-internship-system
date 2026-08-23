@@ -66,6 +66,7 @@ class TaskSerializer(serializers.ModelSerializer):
         read_only=True,
         allow_null=True,
     )
+    assigned_intern_ids = serializers.SerializerMethodField()
     assign_intern_ids = serializers.PrimaryKeyRelatedField(
         many=True,
         queryset=InternProfile.objects.all(),
@@ -92,22 +93,46 @@ class TaskSerializer(serializers.ModelSerializer):
             "source",
             "display_order",
             "resources",
+            "assigned_intern_ids",
             "assign_intern_ids",
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "created_by", "created_at", "updated_at", "week_number"]
+        read_only_fields = [
+            "id",
+            "created_by",
+            "created_at",
+            "updated_at",
+            "week_number",
+            "assigned_intern_ids",
+        ]
+
+    def get_assigned_intern_ids(self, obj):
+        return [assignment.intern_id for assignment in obj.assignments.all()]
 
     def create(self, validated_data):
         intern_ids = validated_data.pop("assign_intern_ids", [])
         task = Task.objects.create(**validated_data)
         for intern in intern_ids:
-            TaskAssignment.objects.create(task=task, intern=intern)
+            TaskAssignment.objects.get_or_create(task=task, intern=intern)
         return task
 
     def update(self, instance, validated_data):
-        validated_data.pop("assign_intern_ids", None)
-        return super().update(instance, validated_data)
+        intern_ids = validated_data.pop("assign_intern_ids", None)
+        task = super().update(instance, validated_data)
+        if intern_ids is not None:
+            desired_ids = {intern.id for intern in intern_ids}
+            existing = {
+                assignment.intern_id: assignment
+                for assignment in task.assignments.all()
+            }
+            for intern_id, assignment in existing.items():
+                if intern_id not in desired_ids:
+                    assignment.delete()
+            for intern in intern_ids:
+                if intern.id not in existing:
+                    TaskAssignment.objects.create(task=task, intern=intern)
+        return task
 
 
 class TaskAssignmentSerializer(serializers.ModelSerializer):

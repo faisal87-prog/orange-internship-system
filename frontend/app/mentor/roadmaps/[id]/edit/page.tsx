@@ -109,6 +109,16 @@ export default function EditRoadmapPage() {
   }, [load]);
 
   const programInterns = useMemo(() => internOptions, [internOptions]);
+  const internNames = useMemo(
+    () => Object.fromEntries(programInterns.map((item) => [item.id, item.name])),
+    [programInterns],
+  );
+
+  function defaultAssignedInternIds(map: Roadmap): string[] {
+    if (map.assignedInternIds.length) return [...map.assignedInternIds];
+    if (map.scope === "PROGRAM") return programInterns.map((item) => item.id);
+    return [];
+  }
 
   function updateWeek(weekNumber: number, updater: (week: RoadmapWeek) => RoadmapWeek) {
     setRoadmap((prev) => {
@@ -225,7 +235,12 @@ export default function EditRoadmapPage() {
         assignment_scope: roadmap.scope,
         number_of_weeks: roadmap.numberOfWeeks,
         assigned_intern_ids:
-          roadmap.scope === "PROGRAM" ? [] : roadmap.assignedInternIds.map(Number),
+          roadmap.scope === "PROGRAM"
+            ? (roadmap.assignedInternIds.length
+                ? roadmap.assignedInternIds
+                : programInterns.map((item) => item.id)
+              ).map(Number)
+            : roadmap.assignedInternIds.map(Number),
       });
 
       for (const taskId of removedTaskIds) {
@@ -467,6 +482,7 @@ export default function EditRoadmapPage() {
             week={week}
             readOnly={false}
             roadmapScope={roadmap.scope}
+            internNames={internNames}
             actions={
               <>
                 <button type="button" className="btn-secondary px-3 py-1.5 text-xs" onClick={() => moveWeek(week.weekNumber, -1)}>
@@ -481,7 +497,13 @@ export default function EditRoadmapPage() {
                   onClick={() =>
                     updateWeek(week.weekNumber, (w) => ({
                       ...w,
-                      suggestedTasks: [...w.suggestedTasks, emptyTask()],
+                      suggestedTasks: [
+                        ...w.suggestedTasks,
+                        {
+                          ...emptyTask(),
+                          assignedInternIds: defaultAssignedInternIds(roadmap),
+                        },
+                      ],
                     }))
                   }
                 >

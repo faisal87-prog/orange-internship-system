@@ -121,6 +121,10 @@ class RoadmapPublishSerializer(serializers.Serializer):
 
         for week in roadmap.weeks.all():
             for task in week.tasks.all():
+                # Prefer existing intended assignees (AI draft / mentor edits).
+                # Only backfill when a task still has none.
+                if task.assignments.exists():
+                    continue
                 for intern in interns:
                     TaskAssignment.objects.get_or_create(
                         task=task,

@@ -8,11 +8,22 @@ from rest_framework.response import Response
 from apps.reports.models import FinalInternshipSummary, WeeklyReport
 from apps.reports.serializers import (
     FinalInternshipSummarySerializer,
+    WeeklyReportGenerateContinueSerializer,
+    WeeklyReportGeneratePromptSerializer,
     WeeklyReportSerializer,
 )
 from common.constants import AiContentStatus, Role
 from permissions.roles import IsMentor
-from services.pdf import generate_final_summary_pdf, generate_weekly_report_pdf
+from services.ai.weekly_report_service import (
+    build_ai_weekly_report_prompt_preview,
+    continue_ai_weekly_report_generation,
+    to_weekly_report_api_error_payload,
+)
+from services.pdf import (
+    generate_final_summary_pdf,
+    generate_weekly_report_pdf,
+    weekly_report_pdf_filename,
+)
 from services.weekly_score import refresh_weekly_report_score
 
 
@@ -40,7 +51,16 @@ class WeeklyReportViewSet(viewsets.ModelViewSet):
         return qs.none()
 
     def get_permissions(self):
-        if self.action in {"create", "update", "partial_update", "destroy", "approve", "refresh_score"}:
+        if self.action in {
+            "create",
+            "update",
+            "partial_update",
+            "destroy",
+            "approve",
+            "refresh_score",
+            "generate_prompt",
+            "generate_continue",
+        }:
             return [IsMentor()]
         return [IsAuthenticated()]
 
@@ -55,6 +75,39 @@ class WeeklyReportViewSet(viewsets.ModelViewSet):
         if report.program.mentor_id != self.request.user.id:
             raise PermissionDenied("Not your report.")
         serializer.save()
+
+    @action(detail=False, methods=["post"], url_path="generate/prompt")
+    def generate_prompt(self, request):
+        serializer = WeeklyReportGeneratePromptSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            preview = build_ai_weekly_report_prompt_preview(
+                mentor=request.user,
+                program_id=serializer.validated_data["program_id"],
+                intern_id=serializer.validated_data["intern_id"],
+                roadmap_week_id=serializer.validated_data["roadmap_week_id"],
+            )
+        except Exception as exc:  # noqa: BLE001
+            status_code, payload = to_weekly_report_api_error_payload(exc)
+            return Response(payload, status=status_code)
+        return Response(preview, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["post"], url_path="generate/continue")
+    def generate_continue(self, request):
+        serializer = WeeklyReportGenerateContinueSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            report = continue_ai_weekly_report_generation(
+                mentor=request.user,
+                preview_id=str(serializer.validated_data["preview_id"]),
+            )
+        except Exception as exc:  # noqa: BLE001
+            status_code, payload = to_weekly_report_api_error_payload(exc)
+            return Response(payload, status=status_code)
+        return Response(
+            WeeklyReportSerializer(report, context={"request": request}).data,
+            status=status.HTTP_201_CREATED,
+        )
 
     @action(detail=True, methods=["post"])
     def approve(self, request, pk=None):
@@ -87,10 +140,15 @@ class WeeklyReportViewSet(viewsets.ModelViewSet):
         if not report.pdf_file:
             if report.status == AiContentStatus.APPROVED:
                 generate_weekly_report_pdf(report)
+            elif request.user.role == Role.MENTOR and report.program.mentor_id == request.user.id:
+                generate_weekly_report_pdf(report, draft_watermark=True)
             else:
                 raise Http404("PDF not available.")
-        return FileResponse(report.pdf_file.open("rb"), as_attachment=True, filename=report.pdf_file.name)
-
+        return FileResponse(
+            report.pdf_file.open("rb"),
+            as_attachment=True,
+            filename=weekly_report_pdf_filename(report),
+        )
 
 class FinalInternshipSummaryViewSet(viewsets.ModelViewSet):
     serializer_class = FinalInternshipSummarySerializer

@@ -61,3 +61,6 @@ export function RoadmapGenerationLoader({
     </div>
   );
 }
+
+/** Generic Orange AI loader used by Weekly Reports and other AI features. */
+export const AiGenerationLoader = RoadmapGenerationLoader;

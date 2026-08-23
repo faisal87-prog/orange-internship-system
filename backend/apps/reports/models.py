@@ -37,6 +37,7 @@ class WeeklyReport(models.Model):
         validators=[MinValueValidator(0), MaxValueValidator(100)],
     )
     additional_mentor_notes = models.TextField(blank=True)
+    generated_by_ai = models.BooleanField(default=False)
     status = models.CharField(
         max_length=20,
         choices=AiContentStatus.CHOICES,
@@ -57,7 +58,13 @@ class WeeklyReport(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
-
+        constraints = [
+            models.UniqueConstraint(
+                fields=["intern", "roadmap_week"],
+                condition=models.Q(roadmap_week__isnull=False),
+                name="unique_weekly_report_intern_week",
+            )
+        ]
     def __str__(self):
         week = self.roadmap_week.week_number if self.roadmap_week else "?"
         return f"Week {week} report · {self.intern.user.full_name}"

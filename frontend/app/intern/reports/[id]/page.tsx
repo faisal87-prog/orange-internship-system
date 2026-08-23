@@ -103,7 +103,7 @@ export default function InternReportDetailPage() {
         <div>
           <h2 className="font-semibold">Achievements</h2>
           <ul className="list-disc pl-5 text-ink-muted">
-            {report.content.achievements.map((a) => (
+            {(report.content.achievements || []).map((a) => (
               <li key={a}>{a}</li>
             ))}
           </ul>
@@ -111,6 +111,18 @@ export default function InternReportDetailPage() {
         <div>
           <h2 className="font-semibold">Learning progress</h2>
           <p className="text-ink-muted">{report.content.learningProgress}</p>
+        </div>
+        <div>
+          <h2 className="font-semibold">Productivity analysis</h2>
+          <p className="text-ink-muted">{report.content.productivityAnalysis}</p>
+        </div>
+        <div>
+          <h2 className="font-semibold">Mentor focus suggestions</h2>
+          <ul className="list-disc pl-5 text-ink-muted">
+            {(report.content.mentorFocusSuggestions || []).map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
         </div>
         <div>
           <h2 className="font-semibold">Recommended focus next week</h2>

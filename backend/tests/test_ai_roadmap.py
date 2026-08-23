@@ -244,7 +244,6 @@ class AIRoadmapTwoStepTests(TestCase):
         self.assertIn("final_roadmap_generation_prompt", response.data)
         self.assertEqual(response.data["prompt_title"], "Custom roadmap prompt")
         self.assertEqual(Roadmap.objects.count(), before)
-        self.assertEqual(TaskAssignment.objects.count(), 0)
         self.assertEqual(mock_parse.call_count, 1)
         self.assertIs(mock_parse.call_args.kwargs["text_format"], GeneratedRoadmapPrompt)
 
@@ -281,7 +280,20 @@ class AIRoadmapTwoStepTests(TestCase):
         tasks = Task.objects.filter(roadmap_week__roadmap=roadmap)
         self.assertEqual(tasks.count(), 8)
         self.assertEqual(tasks.filter(source=TaskSource.AI_GENERATED).count(), 8)
-        self.assertEqual(TaskAssignment.objects.filter(task__in=tasks).count(), 0)
+        # PROGRAM scope assigns every current program intern to every task.
+        self.assertEqual(
+            TaskAssignment.objects.filter(task__in=tasks).count(),
+            tasks.count() * 2,  # intern + intern_b
+        )
+        for task in tasks:
+            self.assertEqual(
+                set(task.assignments.values_list("intern_id", flat=True)),
+                {self.intern.id, self.intern_b.id},
+            )
+        self.assertEqual(
+            set(continue_response.data["weeks"][0]["tasks"][0]["assigned_intern_ids"]),
+            {self.intern.id, self.intern_b.id},
+        )
 
         # Prompt Builder once + Roadmap Generator once (success path)
         self.assertEqual(mock_parse.call_count, 2)
@@ -660,4 +672,211 @@ class AIRoadmapTwoStepTests(TestCase):
         self.assertIn(
             response.status_code,
             {status.HTTP_404_NOT_FOUND, status.HTTP_405_METHOD_NOT_ALLOWED},
+        )
+
+    def _continue_scope(self, *, scope, selected_intern_ids=None, mentor_focus_skills=None):
+        preview = self._build_prompt(
+            assignment_scope=scope,
+            selected_intern_ids=selected_intern_ids or [],
+            mentor_focus_skills=mentor_focus_skills or [],
+        )
+        self.assertEqual(preview.status_code, status.HTTP_200_OK)
+        response = self.client.post(
+            CONTINUE_URL,
+            {"preview_id": preview.data["preview_id"]},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        return response
+
+    @patch("services.ai.client.parse_structured")
+    def test_individual_tasks_assigned_only_to_selected_intern(self, mock_parse):
+        self._mock_full(mock_parse)
+        self.auth(self.mentor)
+        response = self._continue_scope(
+            scope=RoadmapScope.INDIVIDUAL,
+            selected_intern_ids=[self.intern.id],
+        )
+        roadmap = Roadmap.objects.get(id=response.data["id"])
+        self.assertEqual(roadmap.status, RoadmapStatus.DRAFT)
+        tasks = Task.objects.filter(roadmap_week__roadmap=roadmap)
+        self.assertTrue(tasks.exists())
+        for task in tasks:
+            assignee_ids = set(task.assignments.values_list("intern_id", flat=True))
+            self.assertEqual(assignee_ids, {self.intern.id})
+            self.assertNotIn(self.intern_b.id, assignee_ids)
+        self.assertEqual(
+            response.data["weeks"][0]["tasks"][0]["assigned_intern_ids"],
+            [self.intern.id],
+        )
+
+    @patch("services.ai.client.parse_structured")
+    def test_group_tasks_assigned_to_all_selected_interns(self, mock_parse):
+        self._mock_full(mock_parse)
+        self.auth(self.mentor)
+        response = self._continue_scope(
+            scope=RoadmapScope.GROUP,
+            selected_intern_ids=[self.intern.id, self.intern_b.id],
+        )
+        roadmap = Roadmap.objects.get(id=response.data["id"])
+        tasks = Task.objects.filter(roadmap_week__roadmap=roadmap)
+        for task in tasks:
+            self.assertEqual(
+                set(task.assignments.values_list("intern_id", flat=True)),
+                {self.intern.id, self.intern_b.id},
+            )
+
+    @patch("services.ai.client.parse_structured")
+    def test_program_tasks_assigned_to_all_program_interns(self, mock_parse):
+        self._mock_full(mock_parse)
+        self.auth(self.mentor)
+        response = self._continue_scope(scope=RoadmapScope.PROGRAM)
+        roadmap = Roadmap.objects.get(id=response.data["id"])
+        self.assertEqual(
+            set(roadmap.assigned_interns.values_list("id", flat=True)),
+            {self.intern.id, self.intern_b.id},
+        )
+        tasks = Task.objects.filter(roadmap_week__roadmap=roadmap)
+        for task in tasks:
+            self.assertEqual(
+                set(task.assignments.values_list("intern_id", flat=True)),
+                {self.intern.id, self.intern_b.id},
+            )
+
+    @patch("services.ai.client.parse_structured")
+    def test_draft_assignments_hidden_from_intern_until_publish(self, mock_parse):
+        self._mock_full(mock_parse)
+        self.auth(self.mentor)
+        response = self._continue_scope(
+            scope=RoadmapScope.INDIVIDUAL,
+            selected_intern_ids=[self.intern.id],
+        )
+        roadmap = Roadmap.objects.get(id=response.data["id"])
+        assignment_ids = list(
+            TaskAssignment.objects.filter(
+                task__roadmap_week__roadmap=roadmap,
+                intern=self.intern,
+            ).values_list("id", flat=True)
+        )
+        self.assertTrue(assignment_ids)
+
+        self.auth(self.intern_user)
+        listed = self.client.get("/api/tasks/assignments/")
+        self.assertEqual(listed.status_code, status.HTTP_200_OK)
+        listed_rows = listed.data["results"] if isinstance(listed.data, dict) else listed.data
+        visible_ids = {item["id"] for item in listed_rows}
+        self.assertTrue(set(assignment_ids).isdisjoint(visible_ids))
+        blocked = self.client.get(f"/api/tasks/assignments/{assignment_ids[0]}/")
+        self.assertEqual(blocked.status_code, status.HTTP_404_NOT_FOUND)
+
+        self.auth(self.mentor)
+        published = self.client.post(f"/api/roadmaps/{roadmap.id}/publish/", {}, format="json")
+        self.assertEqual(published.status_code, status.HTTP_200_OK)
+        self.assertEqual(published.data["status"], RoadmapStatus.PUBLISHED)
+
+        self.auth(self.intern_user)
+        listed_after = self.client.get("/api/tasks/assignments/")
+        self.assertEqual(listed_after.status_code, status.HTTP_200_OK)
+        listed_after_rows = (
+            listed_after.data["results"]
+            if isinstance(listed_after.data, dict)
+            else listed_after.data
+        )
+        visible_after = {item["id"] for item in listed_after_rows}
+        self.assertTrue(set(assignment_ids).issubset(visible_after))
+
+    @patch("services.ai.client.parse_structured")
+    def test_publish_does_not_duplicate_existing_assignments(self, mock_parse):
+        self._mock_full(mock_parse)
+        self.auth(self.mentor)
+        response = self._continue_scope(
+            scope=RoadmapScope.GROUP,
+            selected_intern_ids=[self.intern.id, self.intern_b.id],
+        )
+        roadmap = Roadmap.objects.get(id=response.data["id"])
+        before = TaskAssignment.objects.filter(
+            task__roadmap_week__roadmap=roadmap
+        ).count()
+        self.assertGreater(before, 0)
+
+        published = self.client.post(f"/api/roadmaps/{roadmap.id}/publish/", {}, format="json")
+        self.assertEqual(published.status_code, status.HTTP_200_OK)
+        after = TaskAssignment.objects.filter(
+            task__roadmap_week__roadmap=roadmap
+        ).count()
+        self.assertEqual(after, before)
+
+    @patch("services.ai.client.parse_structured")
+    def test_mentor_can_edit_task_assignees_before_publish(self, mock_parse):
+        self._mock_full(mock_parse)
+        self.auth(self.mentor)
+        response = self._continue_scope(
+            scope=RoadmapScope.GROUP,
+            selected_intern_ids=[self.intern.id, self.intern_b.id],
+        )
+        task_id = response.data["weeks"][0]["tasks"][0]["id"]
+        updated = self.client.patch(
+            f"/api/tasks/{task_id}/",
+            {"assign_intern_ids": [self.intern.id]},
+            format="json",
+        )
+        self.assertEqual(updated.status_code, status.HTTP_200_OK)
+        self.assertEqual(updated.data["assigned_intern_ids"], [self.intern.id])
+        task = Task.objects.get(id=task_id)
+        self.assertEqual(
+            set(task.assignments.values_list("intern_id", flat=True)),
+            {self.intern.id},
+        )
+
+        published = self.client.post(
+            f"/api/roadmaps/{response.data['id']}/publish/",
+            {},
+            format="json",
+        )
+        self.assertEqual(published.status_code, status.HTTP_200_OK)
+        task.refresh_from_db()
+        # Publish must not re-add the removed intern.
+        self.assertEqual(
+            set(task.assignments.values_list("intern_id", flat=True)),
+            {self.intern.id},
+        )
+
+    def test_manual_task_assignment_still_works(self):
+        self.auth(self.mentor)
+        roadmap = Roadmap.objects.create(
+            program=self.program,
+            title="Manual roadmap",
+            summary="Manual",
+            assignment_scope=RoadmapScope.INDIVIDUAL,
+            number_of_weeks=1,
+            status=RoadmapStatus.DRAFT,
+        )
+        roadmap.assigned_interns.set([self.intern])
+        week = RoadmapWeek.objects.create(
+            roadmap=roadmap,
+            week_number=1,
+            weekly_focus="Focus",
+            display_order=1,
+        )
+        created = self.client.post(
+            "/api/tasks/",
+            {
+                "program": self.program.id,
+                "roadmap_week": week.id,
+                "title": "Manual task",
+                "description": "Do the work",
+                "difficulty": "EASY",
+                "estimated_time_minutes": 60,
+                "due_date": self.program.start_date.isoformat(),
+                "requirement_type": "REQUIRED",
+                "source": "MANUAL",
+                "assign_intern_ids": [self.intern.id],
+            },
+            format="json",
+        )
+        self.assertEqual(created.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(created.data["assigned_intern_ids"], [self.intern.id])
+        self.assertEqual(
+            TaskAssignment.objects.filter(task_id=created.data["id"]).count(),
+            1,
         )

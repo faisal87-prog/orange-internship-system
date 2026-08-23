@@ -1,3 +1,4 @@
+from django.db.models import Q
 from rest_framework import viewsets
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.permissions import IsAuthenticated
@@ -8,8 +9,15 @@ from apps.tasks.serializers import (
     TaskResourceSerializer,
     TaskSerializer,
 )
-from common.constants import Role
+from common.constants import Role, RoadmapStatus
 from permissions.roles import IsMentor
+
+
+def _intern_visible_task_filter():
+    """Draft roadmap tasks stay mentor-only until the roadmap is published."""
+    return Q(roadmap_week__isnull=True) | Q(
+        roadmap_week__roadmap__status=RoadmapStatus.PUBLISHED
+    )
 
 
 class TaskViewSet(viewsets.ModelViewSet):
@@ -18,15 +26,17 @@ class TaskViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
-        qs = Task.objects.select_related("program", "roadmap_week", "created_by").prefetch_related(
-            "resources"
-        )
+        qs = Task.objects.select_related(
+            "program", "roadmap_week", "roadmap_week__roadmap", "created_by"
+        ).prefetch_related("resources", "assignments")
         if user.role == Role.ADMIN:
             return qs
         if user.role == Role.MENTOR:
             return qs.filter(program__mentor=user)
         if user.role == Role.INTERN and hasattr(user, "intern_profile"):
-            return qs.filter(assignments__intern=user.intern_profile).distinct()
+            return qs.filter(
+                assignments__intern=user.intern_profile
+            ).filter(_intern_visible_task_filter()).distinct()
         return qs.none()
 
     def get_permissions(self):
@@ -47,13 +57,22 @@ class TaskResourceViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
-        qs = TaskResource.objects.select_related("task__program")
+        qs = TaskResource.objects.select_related(
+            "task__program", "task__roadmap_week__roadmap"
+        )
         if user.role == Role.ADMIN:
             return qs
         if user.role == Role.MENTOR:
             return qs.filter(task__program__mentor=user)
         if user.role == Role.INTERN and hasattr(user, "intern_profile"):
-            return qs.filter(task__assignments__intern=user.intern_profile).distinct()
+            return (
+                qs.filter(task__assignments__intern=user.intern_profile)
+                .filter(
+                    Q(task__roadmap_week__isnull=True)
+                    | Q(task__roadmap_week__roadmap__status=RoadmapStatus.PUBLISHED)
+                )
+                .distinct()
+            )
         return qs.none()
 
     def get_permissions(self):
@@ -79,6 +98,7 @@ class TaskAssignmentViewSet(viewsets.ModelViewSet):
             "task",
             "task__program",
             "task__roadmap_week",
+            "task__roadmap_week__roadmap",
             "intern__user",
         ).prefetch_related("task__resources")
         if user.role == Role.ADMIN:
@@ -86,7 +106,10 @@ class TaskAssignmentViewSet(viewsets.ModelViewSet):
         if user.role == Role.MENTOR:
             return qs.filter(task__program__mentor=user)
         if user.role == Role.INTERN and hasattr(user, "intern_profile"):
-            return qs.filter(intern=user.intern_profile)
+            return qs.filter(intern=user.intern_profile).filter(
+                Q(task__roadmap_week__isnull=True)
+                | Q(task__roadmap_week__roadmap__status=RoadmapStatus.PUBLISHED)
+            )
         return qs.none()
 
     def perform_create(self, serializer):

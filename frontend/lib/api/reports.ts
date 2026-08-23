@@ -39,6 +39,43 @@ export async function downloadWeeklyReportPdf(id: string) {
   await apiDownload(`/api/reports/weekly/${id}/download_pdf/`, `weekly-report-${id}.pdf`);
 }
 
+export type WeeklyReportPromptPreview = {
+  preview_id: string;
+  prompt_title: string;
+  final_weekly_report_generation_prompt: string;
+  important_constraints: string[];
+  personalization_points: string[];
+  missing_context_notes?: string[];
+  program_id: number;
+  intern_id: number;
+  roadmap_week_id: number;
+  week_number: number;
+  overall_weekly_score: number | null;
+};
+
+export async function buildWeeklyReportPrompt(payload: {
+  program_id: number;
+  intern_id: number;
+  roadmap_week_id: number;
+}) {
+  return apiRequest<WeeklyReportPromptPreview>("/api/reports/weekly/generate/prompt/", {
+    method: "POST",
+    body: payload,
+  });
+}
+
+export async function continueWeeklyReportGeneration(previewId: string) {
+  const raw = await apiRequest<any>("/api/reports/weekly/generate/continue/", {
+    method: "POST",
+    body: { preview_id: previewId },
+  });
+  return {
+    ...adaptWeeklyReport(raw),
+    overallWeeklyScore: raw.overall_weekly_score,
+    pdfUrl: raw.pdf_url,
+  };
+}
+
 export async function listFinalSummaries(): Promise<FinalSummary[]> {
   const data = await apiRequest("/api/reports/final-summaries/");
   return unwrapList(data).map(adaptFinalSummary);

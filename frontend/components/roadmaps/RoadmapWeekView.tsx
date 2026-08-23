@@ -11,23 +11,23 @@ function TaskApplicability({
   internNames?: Record<string, string>;
   roadmapScope?: RoadmapScope;
 }) {
+  if (ids?.length) {
+    const items = ids.map((id) => ({
+      id,
+      name: internNames?.[id] ?? id,
+    }));
+    return <InternChips items={items} />;
+  }
   if (roadmapScope === "PROGRAM") {
     return <span className="text-ink-muted">Entire Program</span>;
   }
-  if (!ids?.length) {
-    return (
-      <span className="text-ink-muted">
-        {roadmapScope === "GROUP" || roadmapScope === "INDIVIDUAL"
-          ? "No interns selected for this task"
-          : "Not specified"}
-      </span>
-    );
-  }
-  const items = ids.map((id) => ({
-    id,
-    name: internNames?.[id] ?? id,
-  }));
-  return <InternChips items={items} />;
+  return (
+    <span className="text-ink-muted">
+      {roadmapScope === "GROUP" || roadmapScope === "INDIVIDUAL"
+        ? "No interns selected for this task"
+        : "Not specified"}
+    </span>
+  );
 }
 
 export function RoadmapTaskCard({
@@ -82,9 +82,7 @@ export function RoadmapTaskCard({
           <dd>{task.successCriteria}</dd>
         </div>
         <div className="sm:col-span-2">
-          <dt className="font-semibold text-ink-muted">
-            {roadmapScope === "PROGRAM" ? "Applies to" : "Assigned interns"}
-          </dt>
+          <dt className="font-semibold text-ink-muted">Assigned interns</dt>
           <dd>
             <TaskApplicability
               ids={task.assignedInternIds}

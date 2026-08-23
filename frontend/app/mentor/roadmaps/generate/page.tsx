@@ -242,7 +242,7 @@ export default function GenerateRoadmapPage() {
             </div>
           </section>
 
-          <section className="card grid gap-4 p-5 md:grid-cols-3">
+          <section className="card grid gap-4 p-5 md:grid-cols-2">
             <div>
               <h3 className="text-sm font-semibold text-ink">Important Constraints</h3>
               <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-ink-muted">
@@ -259,15 +259,6 @@ export default function GenerateRoadmapPage() {
                   <li key={item}>{item}</li>
                 ))}
                 {(preview.personalization_points || []).length === 0 ? <li>None</li> : null}
-              </ul>
-            </div>
-            <div>
-              <h3 className="text-sm font-semibold text-ink">Missing Context Notes</h3>
-              <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-ink-muted">
-                {(preview.missing_context_notes || []).map((item) => (
-                  <li key={item}>{item}</li>
-                ))}
-                {(preview.missing_context_notes || []).length === 0 ? <li>None</li> : null}
               </ul>
             </div>
           </section>

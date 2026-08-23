@@ -18,6 +18,14 @@ def roadmap_model() -> str:
     return getattr(settings, "OPENAI_ROADMAP_MODEL", "gpt-5.6-terra")
 
 
+def weekly_report_model() -> str:
+    return getattr(
+        settings,
+        "OPENAI_WEEKLY_REPORT_MODEL",
+        None,
+    ) or roadmap_model()
+
+
 def openai_timeout_seconds() -> float:
     return float(getattr(settings, "OPENAI_TIMEOUT_SECONDS", 60))
 

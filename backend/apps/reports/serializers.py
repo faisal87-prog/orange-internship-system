@@ -34,6 +34,7 @@ class WeeklyReportSerializer(serializers.ModelSerializer):
             "recommended_next_focus",
             "overall_weekly_score",
             "additional_mentor_notes",
+            "generated_by_ai",
             "status",
             "approved_by",
             "approved_at",
@@ -45,6 +46,7 @@ class WeeklyReportSerializer(serializers.ModelSerializer):
         read_only_fields = [
             "id",
             "overall_weekly_score",
+            "generated_by_ai",
             "approved_by",
             "approved_at",
             "pdf_file",
@@ -90,6 +92,16 @@ class WeeklyReportSerializer(serializers.ModelSerializer):
             return instance
         instance.save()
         return instance
+
+
+class WeeklyReportGeneratePromptSerializer(serializers.Serializer):
+    program_id = serializers.IntegerField()
+    intern_id = serializers.IntegerField()
+    roadmap_week_id = serializers.IntegerField()
+
+
+class WeeklyReportGenerateContinueSerializer(serializers.Serializer):
+    preview_id = serializers.UUIDField()
 
 
 class FinalInternshipSummarySerializer(serializers.ModelSerializer):
