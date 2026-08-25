@@ -26,6 +26,14 @@ def weekly_report_model() -> str:
     ) or roadmap_model()
 
 
+def final_summary_model() -> str:
+    return getattr(
+        settings,
+        "OPENAI_FINAL_SUMMARY_MODEL",
+        None,
+    ) or roadmap_model()
+
+
 def openai_timeout_seconds() -> float:
     return float(getattr(settings, "OPENAI_TIMEOUT_SECONDS", 60))
 

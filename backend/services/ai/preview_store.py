@@ -12,6 +12,7 @@ from services.ai.exceptions import AIPermissionError, AIValidationError
 
 DEFAULT_PREVIEW_KEY_PREFIX = "ai_roadmap_preview:"
 WEEKLY_REPORT_PREVIEW_KEY_PREFIX = "ai_weekly_report_preview:"
+FINAL_SUMMARY_PREVIEW_KEY_PREFIX = "ai_final_summary_preview:"
 
 
 def _ttl() -> int:

@@ -154,7 +154,12 @@ export interface Task {
 export interface TaskAssignment {
   id: string;
   taskId: string;
+  taskTitle?: string;
+  programId?: string;
+  programTitle?: string;
+  weekNumber?: number | null;
   internProfileId: string;
+  internName?: string;
   status: TaskStatus;
   deadline: string;
   score?: number;
@@ -210,7 +215,18 @@ export interface FinalSummary {
     goalAchievement: string;
     finalPerformanceSummary: string;
   };
-  mentorFinalScore?: number;
+    mentorFinalScore?: number;
+  scoredWeeklyReportCount?: number;
+  weekPerformance?: {
+    weeks: Array<{
+      week_number: number;
+      weekly_score: number | null;
+      completed_tasks: number;
+      total_tasks: number;
+      needs_revision: number;
+      main_focus: string | null;
+    }>;
+  };
   mentorFinalComments?: string;
   /** Extra notes/context added by the mentor while editing */
   additionalMentorNotes?: string;

@@ -238,12 +238,28 @@ export function adaptTask(raw: any): Task {
 }
 
 export function adaptAssignment(raw: any): TaskAssignment {
+  const nestedTask = typeof raw.task === "object" && raw.task ? raw.task : null;
+  const program = raw.program || nestedTask?.program;
+  const roadmapWeek = raw.roadmap_week || null;
   return {
     id: String(raw.id),
-    taskId: String(raw.task?.id ?? raw.task ?? raw.task_id),
+    taskId: String(nestedTask?.id ?? raw.task ?? raw.task_id),
+    taskTitle: nestedTask?.title || undefined,
+    programId: String(
+      (typeof program === "object" ? program?.id : program) ??
+        nestedTask?.program ??
+        "",
+    ),
+    programTitle:
+      (typeof program === "object" ? program?.title : undefined) || undefined,
+    weekNumber:
+      roadmapWeek?.week_number ??
+      nestedTask?.week_number ??
+      (nestedTask?.weekNumber != null ? Number(nestedTask.weekNumber) : null),
     internProfileId: String(raw.intern?.id ?? raw.intern ?? raw.intern_id),
+    internName: raw.intern_name || undefined,
     status: raw.status as TaskStatus,
-    deadline: raw.effective_due_date || raw.due_date_override || raw.task?.due_date || raw.deadline,
+    deadline: raw.effective_due_date || raw.due_date_override || nestedTask?.due_date || raw.deadline,
     score: raw.score ?? undefined,
     mentorFeedback: raw.mentor_feedback || raw.mentorFeedback || "",
     completedAt: raw.completed_at || raw.completedAt,
@@ -283,7 +299,15 @@ export function adaptFinalSummary(raw: any): FinalSummary {
       goalAchievement: raw.goal_achievement || "",
       finalPerformanceSummary: raw.final_performance_summary || "",
     },
-    mentorFinalScore: raw.final_score ?? undefined,
+    mentorFinalScore:
+      raw.final_score === null || raw.final_score === undefined
+        ? undefined
+        : Number(raw.final_score),
+    scoredWeeklyReportCount:
+      raw.scored_weekly_report_count != null
+        ? Number(raw.scored_weekly_report_count)
+        : undefined,
+    weekPerformance: raw.week_performance || undefined,
     mentorFinalComments: raw.mentor_comments || "",
     additionalMentorNotes: raw.additional_mentor_notes || "",
     pdfAvailable: Boolean(raw.pdf_available || raw.pdf_url || raw.pdf_file),

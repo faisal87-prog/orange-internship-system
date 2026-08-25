@@ -7,12 +7,19 @@ export async function listWeeklyReports(): Promise<WeeklyReport[]> {
   return unwrapList(data).map(adaptWeeklyReport);
 }
 
-export async function getWeeklyReport(id: string): Promise<WeeklyReport & { overallWeeklyScore?: number | null; pdfUrl?: string | null }> {
+export async function getWeeklyReport(id: string): Promise<
+  WeeklyReport & {
+    overallWeeklyScore?: number | null;
+    pdfUrl?: string | null;
+    performanceComparison?: import("@/components/reports/WeeklyPerformanceComparisonTable").PerformanceComparison;
+  }
+> {
   const raw = await apiRequest<any>(`/api/reports/weekly/${id}/`);
   return {
     ...adaptWeeklyReport(raw),
     overallWeeklyScore: raw.overall_weekly_score,
     pdfUrl: raw.pdf_url,
+    performanceComparison: raw.performance_comparison,
   };
 }
 
@@ -25,6 +32,7 @@ export async function updateWeeklyReport(id: string, payload: Record<string, unk
     ...adaptWeeklyReport(raw),
     overallWeeklyScore: raw.overall_weekly_score,
     pdfUrl: raw.pdf_url,
+    performanceComparison: raw.performance_comparison,
   };
 }
 
@@ -81,9 +89,18 @@ export async function listFinalSummaries(): Promise<FinalSummary[]> {
   return unwrapList(data).map(adaptFinalSummary);
 }
 
-export async function getFinalSummary(id: string): Promise<FinalSummary & { pdfUrl?: string | null }> {
+export async function getFinalSummary(id: string): Promise<
+  FinalSummary & {
+    pdfUrl?: string | null;
+    weekPerformance?: import("@/components/final-summary/InternshipWeekPerformanceTable").WeekPerformance;
+  }
+> {
   const raw = await apiRequest<any>(`/api/reports/final-summaries/${id}/`);
-  return { ...adaptFinalSummary(raw), pdfUrl: raw.pdf_url };
+  return {
+    ...adaptFinalSummary(raw),
+    pdfUrl: raw.pdf_url,
+    weekPerformance: raw.week_performance,
+  };
 }
 
 export async function updateFinalSummary(id: string, payload: Record<string, unknown>) {
@@ -104,6 +121,38 @@ export async function approveFinalSummary(id: string) {
 export async function downloadFinalSummaryPdf(id: string) {
   await apiDownload(
     `/api/reports/final-summaries/${id}/download_pdf/`,
-    `final-summary-${id}.pdf`,
+    `final-internship-summary-${id}.pdf`,
   );
+}
+
+export type FinalSummaryPromptPreview = {
+  preview_id: string;
+  prompt_title: string;
+  final_final_summary_generation_prompt: string;
+  important_constraints: string[];
+  personalization_points: string[];
+  missing_context_notes?: string[];
+  program_id: number;
+  intern_id: number;
+};
+
+export async function buildFinalSummaryPrompt(payload: {
+  program_id: number;
+  intern_id: number;
+}) {
+  return apiRequest<FinalSummaryPromptPreview>(
+    "/api/reports/final-summaries/generate/prompt/",
+    {
+      method: "POST",
+      body: payload,
+    },
+  );
+}
+
+export async function continueFinalSummaryGeneration(previewId: string) {
+  const raw = await apiRequest<any>("/api/reports/final-summaries/generate/continue/", {
+    method: "POST",
+    body: { preview_id: previewId },
+  });
+  return { ...adaptFinalSummary(raw), pdfUrl: raw.pdf_url };
 }

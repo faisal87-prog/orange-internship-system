@@ -6,6 +6,8 @@ import { useCallback, useEffect, useState } from "react";
 import { ErrorState, LoadingState } from "@/components/ui/AsyncState";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { StatusBadge } from "@/components/ui/StatusBadge";
+import { WeeklyPerformanceComparisonTable } from "@/components/reports/WeeklyPerformanceComparisonTable";
+import type { PerformanceComparison } from "@/components/reports/WeeklyPerformanceComparisonTable";
 import { listInternProfiles } from "@/lib/api/accounts";
 import { getErrorMessage } from "@/lib/api/errors";
 import {
@@ -18,7 +20,10 @@ import { formatScoreOutOf100 } from "@/lib/weeklyScore";
 import { fullName } from "@/lib/names";
 import type { AiContentStatus, WeeklyReport } from "@/types";
 
-type ReportDetail = WeeklyReport & { overallWeeklyScore?: number | null };
+type ReportDetail = WeeklyReport & {
+  overallWeeklyScore?: number | null;
+  performanceComparison?: PerformanceComparison;
+};
 
 export default function WeeklyReportDetailPage() {
   const params = useParams<{ id: string }>();
@@ -225,6 +230,10 @@ export default function WeeklyReportDetailPage() {
           </p>
         )}
       </section>
+
+      <div className="mb-4">
+        <WeeklyPerformanceComparisonTable comparison={report.performanceComparison} />
+      </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
         <section className="card space-y-3 p-5">

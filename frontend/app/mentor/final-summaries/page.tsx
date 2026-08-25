@@ -12,6 +12,7 @@ import { getErrorMessage } from "@/lib/api/errors";
 import { listPrograms } from "@/lib/api/programs";
 import { listFinalSummaries } from "@/lib/api/reports";
 import { fullName } from "@/lib/names";
+import { formatScoreOutOf100 } from "@/lib/weeklyScore";
 import type { FinalSummary } from "@/types";
 
 export default function MentorFinalSummariesPage() {
@@ -57,7 +58,7 @@ export default function MentorFinalSummariesPage() {
     <div>
       <PageHeader
         title="Final internship summaries"
-        description="Generate, review, add final score/comments, approve, and download PDF (ReportLab on backend later)."
+        description="Generate, review, approve, and download PDF. Final Score is calculated from approved weekly reports."
         actions={
           <Link href="/mentor/final-summaries/generate" className="btn-primary">
             Generate summary
@@ -91,7 +92,9 @@ export default function MentorFinalSummariesPage() {
             key: "score",
             header: "Final score",
             render: (row) =>
-              typeof row.mentorFinalScore === "number" ? `${row.mentorFinalScore}/100` : "—",
+              typeof row.mentorFinalScore === "number"
+                ? formatScoreOutOf100(row.mentorFinalScore)
+                : "No scored weeks available.",
           },
           {
             key: "action",

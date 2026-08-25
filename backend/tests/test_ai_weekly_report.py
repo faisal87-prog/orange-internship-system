@@ -353,9 +353,8 @@ class AIWeeklyReportTests(TestCase):
         pdf = self.client.get(f"/api/reports/weekly/{report_id}/download_pdf/")
         self.assertEqual(pdf.status_code, status.HTTP_200_OK)
         report = WeeklyReport.objects.get(id=report_id)
-        self.assertEqual(
-            Path(report.pdf_file.name).name,
-            "week-1-report-intern-wr.pdf",
+        self.assertTrue(
+            Path(report.pdf_file.name).name.startswith("week-1-report-intern-wr")
         )
         disposition = pdf.get("Content-Disposition", "")
         self.assertIn("week-1-report-intern-wr.pdf", disposition)

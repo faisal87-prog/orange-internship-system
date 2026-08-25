@@ -3,13 +3,15 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { WeeklyPerformanceComparisonTable } from "@/components/reports/WeeklyPerformanceComparisonTable";
+import type { PerformanceComparison } from "@/components/reports/WeeklyPerformanceComparisonTable";
 import { WeeklyScoreCard } from "@/components/reports/WeeklyScoreCard";
 import { DownloadPdfButton } from "@/components/resources/DownloadPdfButton";
 import { ErrorState, LoadingState } from "@/components/ui/AsyncState";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { useAuth } from "@/context/AuthContext";
 import { getErrorMessage } from "@/lib/api/errors";
-import { downloadWeeklyReportPdf } from "@/lib/api/reports";
+import { downloadWeeklyReportPdf, getWeeklyReport } from "@/lib/api/reports";
 import { getInternContext, type InternContext } from "@/lib/intern";
 import type { WeeklyTaskScore } from "@/lib/weeklyScore";
 
@@ -19,6 +21,7 @@ export default function InternReportDetailPage() {
   const [ctx, setCtx] = useState<InternContext | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [comparison, setComparison] = useState<PerformanceComparison | null>(null);
 
   const load = useCallback(async () => {
     if (!user) {
@@ -29,13 +32,21 @@ export default function InternReportDetailPage() {
     setLoading(true);
     setError(null);
     try {
-      setCtx(await getInternContext(user.id));
+      const nextCtx = await getInternContext(user.id);
+      setCtx(nextCtx);
+      const found = nextCtx?.approvedReports.find((r) => r.id === params.id);
+      if (found) {
+        const detail = await getWeeklyReport(found.id);
+        setComparison(detail.performanceComparison ?? null);
+      } else {
+        setComparison(null);
+      }
     } catch (err) {
       setError(getErrorMessage(err, "Unable to load report."));
     } finally {
       setLoading(false);
     }
-  }, [user]);
+  }, [params.id, user]);
 
   useEffect(() => {
     void load();
@@ -93,6 +104,10 @@ export default function InternReportDetailPage() {
 
       <div className="mb-4">
         <WeeklyScoreCard scores={scores} />
+      </div>
+
+      <div className="mb-4">
+        <WeeklyPerformanceComparisonTable comparison={comparison} />
       </div>
 
       <div className="card space-y-4 p-6 text-sm">

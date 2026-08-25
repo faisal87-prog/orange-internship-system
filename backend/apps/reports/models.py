@@ -86,13 +86,16 @@ class FinalInternshipSummary(models.Model):
     main_achievements = models.JSONField(default=list, blank=True)
     goal_achievement = models.TextField(blank=True)
     final_performance_summary = models.TextField(blank=True)
-    final_score = models.PositiveSmallIntegerField(
+    final_score = models.DecimalField(
+        max_digits=5,
+        decimal_places=1,
         null=True,
         blank=True,
         validators=[MinValueValidator(0), MaxValueValidator(100)],
     )
     mentor_comments = models.TextField(blank=True)
     additional_mentor_notes = models.TextField(blank=True)
+    generated_by_ai = models.BooleanField(default=False)
     status = models.CharField(
         max_length=20,
         choices=AiContentStatus.CHOICES,
@@ -114,6 +117,11 @@ class FinalInternshipSummary(models.Model):
     class Meta:
         ordering = ["-created_at"]
         verbose_name_plural = "Final internship summaries"
-
+        constraints = [
+            models.UniqueConstraint(
+                fields=["intern", "program"],
+                name="unique_final_summary_intern_program",
+            )
+        ]
     def __str__(self):
         return f"Final summary · {self.intern.user.full_name}"

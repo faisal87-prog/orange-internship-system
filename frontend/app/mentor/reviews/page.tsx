@@ -9,27 +9,24 @@ import { StatusBadge } from "@/components/ui/StatusBadge";
 import { useAuth } from "@/context/AuthContext";
 import { listInternProfiles } from "@/lib/api/accounts";
 import { getErrorMessage } from "@/lib/api/errors";
-import { listAssignments, listTasks } from "@/lib/api/tasks";
+import { listAssignments } from "@/lib/api/tasks";
 import { formatDate } from "@/lib/labels";
 import { fullName } from "@/lib/names";
-import type { Task, TaskAssignment } from "@/types";
+import type { TaskAssignment } from "@/types";
 
 export default function MentorReviewsPage() {
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [queue, setQueue] = useState<TaskAssignment[]>([]);
-  const [tasksById, setTasksById] = useState<Record<string, Task>>({});
-  const [internNames, setInternNames] = useState<Record<string, string>>({});
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [ips, assigns, tasks] = await Promise.all([
+      const [ips, assigns] = await Promise.all([
         listInternProfiles(),
         listAssignments(),
-        listTasks(),
       ]);
       const myInterns = ips.filter((ip) => ip.mentorId === user?.id);
       const internIds = new Set(myInterns.map((ip) => ip.id));
@@ -37,18 +34,17 @@ export default function MentorReviewsPage() {
       myInterns.forEach((ip) => {
         names[ip.id] = fullName(ip.user) || ip.id;
       });
-      const byId: Record<string, Task> = {};
-      tasks.forEach((t) => {
-        byId[t.id] = t;
-      });
-      setInternNames(names);
-      setTasksById(byId);
       setQueue(
-        assigns.filter(
-          (ta) =>
-            internIds.has(ta.internProfileId) &&
-            (ta.status === "SUBMITTED" || ta.status === "NEEDS_REVISION"),
-        ),
+        assigns
+          .filter(
+            (ta) =>
+              internIds.has(ta.internProfileId) &&
+              (ta.status === "SUBMITTED" || ta.status === "NEEDS_REVISION"),
+          )
+          .map((ta) => ({
+            ...ta,
+            internName: ta.internName || names[ta.internProfileId] || "—",
+          })),
       );
     } catch (err) {
       setError(getErrorMessage(err, "Could not load review queue."));
@@ -72,17 +68,30 @@ export default function MentorReviewsPage() {
       />
       <DataTable
         rows={queue}
-        mobileTitle={(row) => tasksById[row.taskId]?.title ?? row.id}
+        mobileTitle={(row) => row.taskTitle || row.id}
         columns={[
           {
             key: "task",
-            header: "Task",
-            render: (row) => tasksById[row.taskId]?.title ?? "—",
+            header: "Task Name",
+            render: (row) => row.taskTitle || "—",
+          },
+          {
+            key: "program",
+            header: "Program",
+            render: (row) => row.programTitle || "—",
+          },
+          {
+            key: "week",
+            header: "Week",
+            render: (row) =>
+              row.weekNumber != null && row.weekNumber !== undefined
+                ? `Week ${row.weekNumber}`
+                : "—",
           },
           {
             key: "intern",
             header: "Intern",
-            render: (row) => internNames[row.internProfileId] || "—",
+            render: (row) => row.internName || "—",
           },
           {
             key: "status",

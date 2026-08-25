@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { FinalSummaryContent } from "@/components/final-summary/FinalSummaryContent";
+import { InternshipWeekPerformanceTable } from "@/components/final-summary/InternshipWeekPerformanceTable";
 import { ErrorState, LoadingState } from "@/components/ui/AsyncState";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { StatusBadge } from "@/components/ui/StatusBadge";
@@ -16,6 +17,7 @@ import {
   updateFinalSummary,
 } from "@/lib/api/reports";
 import { fullName } from "@/lib/names";
+import { formatFinalScoreLabel } from "@/lib/weeklyScore";
 import type { AiContentStatus, FinalSummary } from "@/types";
 
 export default function FinalSummaryDetailPage() {
@@ -25,7 +27,6 @@ export default function FinalSummaryDetailPage() {
   const [summary, setSummary] = useState<FinalSummary | null>(null);
   const [status, setStatus] = useState<AiContentStatus>("DRAFT");
   const [content, setContent] = useState<FinalSummary["content"] | null>(null);
-  const [score, setScore] = useState("");
   const [comments, setComments] = useState("");
   const [mentorNotes, setMentorNotes] = useState("");
   const [internName, setInternName] = useState("Intern");
@@ -43,7 +44,6 @@ export default function FinalSummaryDetailPage() {
       setSummary(detail);
       setStatus(detail.status);
       setContent(detail.content);
-      setScore(detail.mentorFinalScore?.toString() ?? "");
       setComments(detail.mentorFinalComments ?? "");
       setMentorNotes(detail.additionalMentorNotes ?? "");
       const intern = interns.find((ip) => ip.id === detail.internProfileId);
@@ -60,16 +60,13 @@ export default function FinalSummaryDetailPage() {
   }, [load]);
 
   const editable = status === "DRAFT";
+  const scoreLabel = formatFinalScoreLabel(
+    summary?.mentorFinalScore,
+    summary?.scoredWeeklyReportCount,
+  );
 
   async function saveEdits() {
     if (!summary || !content) return;
-    if (score) {
-      const parsed = Number(score);
-      if (!Number.isInteger(parsed) || parsed < 0 || parsed > 100) {
-        setMessage("Final score must be an integer 0–100.");
-        return;
-      }
-    }
     setBusy(true);
     setMessage("");
     try {
@@ -79,14 +76,12 @@ export default function FinalSummaryDetailPage() {
         main_achievements: content.mainAchievements,
         goal_achievement: content.goalAchievement,
         final_performance_summary: content.finalPerformanceSummary,
-        final_score: score ? Number(score) : null,
         mentor_comments: comments,
         additional_mentor_notes: mentorNotes,
       });
       setSummary(updated);
       setContent(updated.content);
       setStatus(updated.status);
-      setScore(updated.mentorFinalScore?.toString() ?? "");
       setComments(updated.mentorFinalComments ?? "");
       setMentorNotes(updated.additionalMentorNotes ?? "");
       setMessage("Edits saved.");
@@ -99,13 +94,6 @@ export default function FinalSummaryDetailPage() {
 
   async function onApprove() {
     if (!summary || !content) return;
-    if (score) {
-      const parsed = Number(score);
-      if (!Number.isInteger(parsed) || parsed < 0 || parsed > 100) {
-        setMessage("Final score must be an integer 0–100.");
-        return;
-      }
-    }
     setBusy(true);
     setMessage("");
     try {
@@ -115,7 +103,6 @@ export default function FinalSummaryDetailPage() {
         main_achievements: content.mainAchievements,
         goal_achievement: content.goalAchievement,
         final_performance_summary: content.finalPerformanceSummary,
-        final_score: score ? Number(score) : null,
         mentor_comments: comments,
         additional_mentor_notes: mentorNotes,
       });
@@ -179,7 +166,11 @@ export default function FinalSummaryDetailPage() {
         <button
           type="button"
           className="btn-secondary"
-          onClick={() => setMessage("AI generation is not connected yet.")}
+          onClick={() => {
+            if (!summary) return;
+            window.location.href = `/mentor/final-summaries/generate?programId=${summary.programId}&internId=${summary.internProfileId}`;
+          }}
+          disabled={!editable || busy}
         >
           Regenerate
         </button>
@@ -208,6 +199,10 @@ export default function FinalSummaryDetailPage() {
         <p className="mb-4 rounded-xl bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{message}</p>
       ) : null}
 
+      <div className="mb-4">
+        <InternshipWeekPerformanceTable weekPerformance={summary.weekPerformance} />
+      </div>
+
       <div className="grid gap-4 lg:grid-cols-2">
         <section className="card p-5">
           <FinalSummaryContent
@@ -219,26 +214,14 @@ export default function FinalSummaryDetailPage() {
 
         <section className="card space-y-4 p-5">
           <div>
-            <label className="label" htmlFor="score">Mentor final score (optional)</label>
-            <input
-              id="score"
-              type="number"
-              min={0}
-              max={100}
-              step={1}
-              className="input"
-              value={score}
-              onChange={(e) => setScore(e.target.value)}
-              disabled={!editable}
-            />
-            {score ? (
-              <p className="mt-1 text-xs text-ink-muted">
-                Displayed as {Number.isInteger(Number(score)) ? `${score} / 100` : "—"}
-              </p>
+            <p className="label">Final Score</p>
+            <p className="mt-1 text-sm font-medium text-ink">{scoreLabel.scoreText}</p>
+            {scoreLabel.detail ? (
+              <p className="mt-1 text-xs text-ink-muted">{scoreLabel.detail}</p>
             ) : null}
           </div>
           <div>
-            <label className="label" htmlFor="comments">Mentor final comments</label>
+            <label className="label" htmlFor="comments">Mentor comments</label>
             <textarea
               id="comments"
               className="input"
@@ -249,7 +232,7 @@ export default function FinalSummaryDetailPage() {
             />
           </div>
           <div>
-            <label className="label" htmlFor="mentorNotes">Additional Mentor Notes</label>
+            <label className="label" htmlFor="mentorNotes">Additional Notes</label>
             <textarea
               id="mentorNotes"
               className="input"
@@ -271,7 +254,8 @@ export default function FinalSummaryDetailPage() {
             </button>
           ) : null}
           <p className="text-xs text-ink-muted">
-            AI does not make hiring decisions. No automatic hiring recommendation is shown.
+            Final Score is calculated automatically from approved weekly report scores.
+            AI does not make hiring decisions.
           </p>
         </section>
       </div>

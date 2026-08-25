@@ -57,3 +57,19 @@ class GeneratedWeeklyReport(BaseModel):
     productivity_analysis: str
     mentor_focus_suggestions: str
     recommended_next_focus: str
+
+
+class GeneratedFinalSummaryPrompt(BaseModel):
+    prompt_title: str
+    final_summary_generation_prompt: str
+    important_constraints: list[str] = Field(default_factory=list)
+    personalization_points: list[str] = Field(default_factory=list)
+    missing_context_notes: list[str] = Field(default_factory=list)
+
+
+class GeneratedFinalSummary(BaseModel):
+    overall_performance_summary: str
+    learning_journey: str
+    main_achievements: str
+    goal_achievement: str
+    final_performance_summary: str

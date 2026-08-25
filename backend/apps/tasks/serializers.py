@@ -144,6 +144,8 @@ class TaskAssignmentSerializer(serializers.ModelSerializer):
         required=False,
     )
     intern_name = serializers.CharField(source="intern.user.full_name", read_only=True)
+    program = serializers.SerializerMethodField()
+    roadmap_week = serializers.SerializerMethodField()
     effective_due_date = serializers.DateField(read_only=True)
     is_overdue = serializers.SerializerMethodField()
 
@@ -153,6 +155,8 @@ class TaskAssignmentSerializer(serializers.ModelSerializer):
             "id",
             "task",
             "task_id",
+            "program",
+            "roadmap_week",
             "intern",
             "intern_name",
             "status",
@@ -175,15 +179,26 @@ class TaskAssignmentSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
             "intern_name",
+            "program",
+            "roadmap_week",
             "effective_due_date",
             "is_overdue",
         ]
+
+    def get_program(self, obj):
+        program = obj.task.program
+        return {"id": program.id, "title": program.title}
+
+    def get_roadmap_week(self, obj):
+        week = obj.task.roadmap_week
+        if week is None:
+            return None
+        return {"id": week.id, "week_number": week.week_number}
 
     def get_is_overdue(self, obj):
         if obj.status == TaskAssignmentStatus.COMPLETED:
             return False
         return obj.effective_due_date < timezone.localdate()
-
     def validate_score(self, value):
         validate_score(value)
         return value

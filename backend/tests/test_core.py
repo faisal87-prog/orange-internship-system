@@ -234,6 +234,19 @@ class BackendCoreTests(TestCase):
         self.assignment.refresh_from_db()
         self.assertEqual(self.assignment.score, 90)
 
+    def test_assignment_list_includes_task_program_and_week(self):
+        self.auth(self.mentor)
+        response = self.client.get("/api/tasks/assignments/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        rows = response.data["results"] if isinstance(response.data, dict) else response.data
+        match = next(row for row in rows if row["id"] == self.assignment.id)
+        self.assertEqual(match["task"]["title"], self.task.title)
+        self.assertEqual(match["program"]["id"], self.program.id)
+        self.assertEqual(match["program"]["title"], self.program.title)
+        self.assertEqual(match["roadmap_week"]["id"], self.week.id)
+        self.assertEqual(match["roadmap_week"]["week_number"], self.week.week_number)
+        self.assertEqual(match["intern_name"], self.intern_user.full_name)
+
     def test_needs_revision_allows_missing_score(self):
         self.auth(self.mentor)
         response = self.client.patch(
