@@ -68,6 +68,15 @@ def _bullet_lines(items) -> list[str]:
     return [f"• {item}" for item in items]
 
 
+def _escape_pdf_text(value: str) -> str:
+    return (
+        (value or "")
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
+
+
 def _score_cell(value) -> str:
     if value is None:
         return "—"
@@ -144,6 +153,67 @@ def _weekly_comparison_table_flowables(comparison: dict, heading_style, body_sty
     return story
 
 
+def _final_weeks_completed_tasks_table_flowables(payload: dict, heading_style, body_style):
+    story = []
+    story.append(Paragraph("Internship Weeks &amp; Completed Tasks", heading_style))
+    weeks = payload.get("weeks") or []
+    if not weeks:
+        story.append(Paragraph("No roadmap weeks available.", body_style))
+        story.append(Spacer(1, 0.1 * inch))
+        return story
+
+    cell_style = ParagraphStyle(
+        "WeeksTasksCell",
+        parent=body_style,
+        fontSize=8,
+        leading=10,
+    )
+    header = ["Week", "Main Focus", "Completed Tasks"]
+    data = [header]
+    for item in weeks:
+        titles = item.get("completed_task_titles") or []
+        if titles:
+            tasks_html = "<br/>".join(
+                f"• {_escape_pdf_text(title)}" for title in titles
+            )
+        else:
+            tasks_html = "No completed tasks recorded."
+        data.append(
+            [
+                f"Week {item['week_number']}",
+                Paragraph(_escape_pdf_text(item.get("main_focus") or "—"), cell_style),
+                Paragraph(tasks_html, cell_style),
+            ]
+        )
+    table = Table(
+        data,
+        colWidths=[0.9 * inch, 2.2 * inch, 3.5 * inch],
+        repeatRows=1,
+    )
+    table.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, 0), ORANGE),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("FONTSIZE", (0, 0), (-1, 0), 9),
+                ("FONTSIZE", (0, 1), (-1, -1), 8),
+                ("TEXTCOLOR", (0, 1), (-1, -1), DARK),
+                ("ALIGN", (0, 0), (0, -1), "CENTER"),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("GRID", (0, 0), (-1, -1), 0.4, MUTED),
+                ("LEFTPADDING", (0, 0), (-1, -1), 4),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ]
+        )
+    )
+    story.append(table)
+    story.append(Spacer(1, 0.15 * inch))
+    return story
+
+
 def _final_week_performance_table_flowables(payload: dict, heading_style, body_style):
     from services.week_performance import format_completed_tasks
 
@@ -170,7 +240,7 @@ def _final_week_performance_table_flowables(payload: dict, heading_style, body_s
                 _score_cell(item.get("weekly_score")),
                 format_completed_tasks(item["completed_tasks"], item["total_tasks"]),
                 str(item["needs_revision"]),
-                Paragraph(item.get("main_focus") or "—", cell_style),
+                Paragraph(_escape_pdf_text(item.get("main_focus") or "—"), cell_style),
             ]
         )
     table = Table(
@@ -467,7 +537,6 @@ def generate_final_summary_pdf(summary, *, draft_watermark: bool = False):
     story.append(Paragraph(f"<b>Intern:</b> {summary.intern.user.full_name}", body_style))
     if internship_dates:
         story.append(Paragraph(f"<b>Internship dates:</b> {internship_dates}", body_style))
-    story.append(Paragraph(f"<b>Final Score:</b> {score}", body_style))
     story.append(
         Paragraph(
             f"<b>Generated:</b> {timezone.localdate().isoformat()}",
@@ -475,21 +544,29 @@ def generate_final_summary_pdf(summary, *, draft_watermark: bool = False):
         )
     )
 
-    sections = [
-        ("Overall Performance Summary", _wrap_text(summary.overall_performance_summary)),
-        ("Learning Journey", _wrap_text(summary.learning_journey)),
-        ("Main Achievements", _bullet_lines(summary.main_achievements)),
-        ("Goal Achievement", _wrap_text(summary.goal_achievement)),
-        ("Final Performance Summary", _wrap_text(summary.final_performance_summary)),
-        ("Mentor Comments", _wrap_text(summary.mentor_comments)),
-        ("Additional Notes", _wrap_text(summary.additional_mentor_notes)),
+    intro_sections = [
+        ("Internship Introduction", _wrap_text(summary.internship_introduction)),
+        ("Training Summary", _wrap_text(summary.training_summary)),
     ]
-    for title, lines in sections:
+    for title, lines in intro_sections:
         story.append(Paragraph(title, heading_style))
         for line in lines:
             story.append(Paragraph(str(line).replace("\n", "<br/>"), body_style))
 
-    from services.week_performance import build_final_summary_week_performance
+    from services.week_performance import (
+        build_final_summary_week_performance,
+        build_final_summary_weeks_completed_tasks,
+    )
+
+    weeks_tasks = build_final_summary_weeks_completed_tasks(
+        intern=summary.intern,
+        program=summary.program,
+    )
+    story.extend(
+        _final_weeks_completed_tasks_table_flowables(
+            weeks_tasks, heading_style, body_style
+        )
+    )
 
     week_performance = build_final_summary_week_performance(
         intern=summary.intern,
@@ -500,6 +577,41 @@ def generate_final_summary_pdf(summary, *, draft_watermark: bool = False):
             week_performance, heading_style, body_style
         )
     )
+
+    narrative_sections = [
+        ("Overall Performance Summary", _wrap_text(summary.overall_performance_summary)),
+        ("Learning Journey", _wrap_text(summary.learning_journey)),
+        ("Main Achievements", _bullet_lines(summary.main_achievements)),
+        ("Goal Achievement", _wrap_text(summary.goal_achievement)),
+        ("Final Performance Summary", _wrap_text(summary.final_performance_summary)),
+    ]
+    for title, lines in narrative_sections:
+        story.append(Paragraph(title, heading_style))
+        for line in lines:
+            story.append(Paragraph(str(line).replace("\n", "<br/>"), body_style))
+
+    story.append(Paragraph("Final Score", heading_style))
+    story.append(Paragraph(score, body_style))
+
+    closing_sections = [
+        ("Mentor Comments", _wrap_text(summary.mentor_comments)),
+        ("Additional Notes", _wrap_text(summary.additional_mentor_notes)),
+    ]
+    for title, lines in closing_sections:
+        story.append(Paragraph(title, heading_style))
+        for line in lines:
+            story.append(Paragraph(str(line).replace("\n", "<br/>"), body_style))
+
+    mentor_name = (
+        getattr(getattr(summary.program, "mentor", None), "full_name", None) or "—"
+    )
+    story.append(Paragraph("Mentor Signature", heading_style))
+    story.append(Paragraph(f"<b>Mentor Name:</b> {_escape_pdf_text(mentor_name)}", body_style))
+    story.append(Spacer(1, 0.15 * inch))
+    story.append(Paragraph("<b>Signature:</b>", body_style))
+    story.append(Spacer(1, 0.45 * inch))
+    story.append(Paragraph("____________________________", body_style))
+    story.append(Spacer(1, 0.35 * inch))
 
     def _footer(canvas_obj, _doc):
         canvas_obj.saveState()

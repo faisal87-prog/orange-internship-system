@@ -6,6 +6,8 @@ from services.ai.exceptions import AIInvalidOutputError
 from services.ai.schemas import GeneratedFinalSummary
 
 REQUIRED_FIELDS = (
+    "internship_introduction",
+    "training_summary",
     "overall_performance_summary",
     "learning_journey",
     "main_achievements",

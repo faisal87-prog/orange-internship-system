@@ -166,7 +166,7 @@ class FinalInternshipSummaryViewSet(viewsets.ModelViewSet):
         user = self.request.user
         qs = FinalInternshipSummary.objects.select_related(
             "intern__user",
-            "program",
+            "program__mentor",
             "approved_by",
         )
         if user.role == Role.ADMIN:

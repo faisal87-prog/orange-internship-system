@@ -287,15 +287,22 @@ export function adaptWeeklyReport(raw: any): WeeklyReport {
 }
 
 export function adaptFinalSummary(raw: any): FinalSummary {
+  const achievements = raw.main_achievements;
   return {
     id: String(raw.id),
     internProfileId: String(raw.intern?.id ?? raw.intern),
     programId: String(raw.program?.id ?? raw.program),
     status: raw.status,
     content: {
+      internshipIntroduction: raw.internship_introduction || "",
+      trainingSummary: raw.training_summary || "",
       overallPerformanceSummary: raw.overall_performance_summary || "",
       learningJourney: raw.learning_journey || "",
-      mainAchievements: raw.main_achievements || [],
+      mainAchievements: Array.isArray(achievements)
+        ? achievements
+        : typeof achievements === "string" && achievements.trim()
+          ? achievements.split("\n").map((line: string) => line.trim()).filter(Boolean)
+          : [],
       goalAchievement: raw.goal_achievement || "",
       finalPerformanceSummary: raw.final_performance_summary || "",
     },
@@ -308,6 +315,8 @@ export function adaptFinalSummary(raw: any): FinalSummary {
         ? Number(raw.scored_weekly_report_count)
         : undefined,
     weekPerformance: raw.week_performance || undefined,
+    weeksCompletedTasks: raw.weeks_completed_tasks || undefined,
+    mentorName: raw.mentor_name || undefined,
     mentorFinalComments: raw.mentor_comments || "",
     additionalMentorNotes: raw.additional_mentor_notes || "",
     pdfAvailable: Boolean(raw.pdf_available || raw.pdf_url || raw.pdf_file),

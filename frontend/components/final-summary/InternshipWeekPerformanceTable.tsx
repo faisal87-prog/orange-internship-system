@@ -27,19 +27,19 @@ export function InternshipWeekPerformanceTable({
 
   return (
     <section className="card space-y-3 p-5">
-      <h2 className="section-title">Internship Performance by Week</h2>
+      <h2 className="section-title text-brand-dark">Internship Performance by Week</h2>
       {weeks.length === 0 ? (
         <p className="text-sm text-ink-muted">No roadmap weeks available.</p>
       ) : (
         <div className="overflow-x-auto">
           <table className="min-w-full border-collapse text-sm">
             <thead>
-              <tr className="border-b border-line text-left text-ink-muted">
-                <th className="px-3 py-2 font-semibold">Week</th>
-                <th className="px-3 py-2 font-semibold">Score</th>
-                <th className="px-3 py-2 font-semibold">Completed Tasks</th>
-                <th className="px-3 py-2 font-semibold">Needs Revision</th>
-                <th className="px-3 py-2 font-semibold">Main Focus</th>
+              <tr className="border-b-2 border-brand bg-brand-soft/60 text-left">
+                <th className="px-3 py-2 font-semibold text-brand-dark">Week</th>
+                <th className="px-3 py-2 font-semibold text-brand-dark">Score</th>
+                <th className="px-3 py-2 font-semibold text-brand-dark">Completed Tasks</th>
+                <th className="px-3 py-2 font-semibold text-brand-dark">Needs Revision</th>
+                <th className="px-3 py-2 font-semibold text-brand-dark">Main Focus</th>
               </tr>
             </thead>
             <tbody>
@@ -57,7 +57,7 @@ export function InternshipWeekPerformanceTable({
                   <td className="px-3 py-2 text-ink-muted text-center">
                     {week.needs_revision}
                   </td>
-                  <td className="px-3 py-2 text-ink-muted">
+                  <td className="px-3 py-2 text-ink-muted break-words">
                     {week.main_focus || "—"}
                   </td>
                 </tr>

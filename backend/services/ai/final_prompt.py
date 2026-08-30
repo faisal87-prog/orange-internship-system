@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Any
 
 from common.constants import RoadmapScope
+from services.ai.roadmap_week_dates import format_authoritative_week_boundaries_block
 from services.ai.schemas import GeneratedRoadmapPrompt
 
 
@@ -17,6 +19,37 @@ def _bullets(items: list[str]) -> str:
     if not cleaned:
         return "- (none)\n"
     return "".join(f"- {item}\n" for item in cleaned)
+
+
+def _parse_iso_date(value: Any) -> date | None:
+    if isinstance(value, date):
+        return value
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(str(value))
+    except ValueError:
+        return None
+
+
+def _week_boundaries_block(program: dict[str, Any]) -> str:
+    start = _parse_iso_date(program.get("start_date"))
+    end = _parse_iso_date(program.get("end_date"))
+    duration = program.get("duration_weeks")
+    try:
+        duration_weeks = int(duration)
+    except (TypeError, ValueError):
+        duration_weeks = 0
+    if start is None or end is None or duration_weeks < 1:
+        return (
+            "Week boundaries could not be derived from Program dates/duration. "
+            "Respect Program start_date, end_date, and duration_weeks exactly.\n"
+        )
+    return format_authoritative_week_boundaries_block(
+        program_start=start,
+        program_end=end,
+        duration_weeks=duration_weeks,
+    )
 
 
 def _program_block(program: dict[str, Any]) -> str:
@@ -204,6 +237,10 @@ def build_final_roadmap_generation_prompt(
             ),
         ),
         _section("AUTHORITATIVE PROGRAM DATA", _program_block(program)),
+        _section(
+            "AUTHORITATIVE ROADMAP WEEK BOUNDARIES",
+            _week_boundaries_block(program),
+        ),
         _section(
             "SKILLS TO DEVELOP — REQUIRED COVERAGE",
             (

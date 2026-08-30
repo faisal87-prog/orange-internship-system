@@ -739,6 +739,10 @@ export const finalSummaries: FinalSummary[] = [
     additionalMentorNotes: "Strong ownership on the submission service module.",
     approvedAt: "2026-07-25T10:00:00Z",
     content: {
+      internshipIntroduction:
+        "This backend internship builds API ownership through guided weekly delivery and a final project.",
+      trainingSummary:
+        "Training covered Django APIs, documentation, and progressive module ownership toward the final project.",
       overallPerformanceSummary: "Maya completed the backend internship with consistent delivery.",
       learningJourney: "Progressed from guided tasks to independently owned endpoints.",
       mainAchievements: ["Shipped submission service module", "Improved API docs"],
@@ -754,6 +758,10 @@ export const finalSummaries: FinalSummary[] = [
     pdfAvailable: false,
     additionalMentorNotes: "",
     content: {
+      internshipIntroduction:
+        "This UI internship develops component systems skills aligned to program goals.",
+      trainingSummary:
+        "Training covered setup excellence, component delivery, and design-system progression.",
       overallPerformanceSummary: "Draft final summary placeholder for mid-program review.",
       learningJourney: "Building UI systems expertise across early weeks.",
       mainAchievements: ["Setup excellence", "Component delivery in progress"],

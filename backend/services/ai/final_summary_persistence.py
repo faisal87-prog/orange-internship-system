@@ -33,6 +33,8 @@ def persist_generated_final_summary(
             )
 
         payload = {
+            "internship_introduction": generated.internship_introduction.strip(),
+            "training_summary": generated.training_summary.strip(),
             "overall_performance_summary": generated.overall_performance_summary.strip(),
             "learning_journey": generated.learning_journey.strip(),
             "main_achievements": text_to_list(generated.main_achievements),

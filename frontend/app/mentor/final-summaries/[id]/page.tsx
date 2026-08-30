@@ -5,6 +5,8 @@ import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { FinalSummaryContent } from "@/components/final-summary/FinalSummaryContent";
 import { InternshipWeekPerformanceTable } from "@/components/final-summary/InternshipWeekPerformanceTable";
+import { InternshipWeeksCompletedTasksTable } from "@/components/final-summary/InternshipWeeksCompletedTasksTable";
+import { MentorSignatureBlock } from "@/components/final-summary/MentorSignatureBlock";
 import { ErrorState, LoadingState } from "@/components/ui/AsyncState";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { StatusBadge } from "@/components/ui/StatusBadge";
@@ -65,20 +67,27 @@ export default function FinalSummaryDetailPage() {
     summary?.scoredWeeklyReportCount,
   );
 
+  function editPayload() {
+    if (!content) return {};
+    return {
+      internship_introduction: content.internshipIntroduction,
+      training_summary: content.trainingSummary,
+      overall_performance_summary: content.overallPerformanceSummary,
+      learning_journey: content.learningJourney,
+      main_achievements: content.mainAchievements,
+      goal_achievement: content.goalAchievement,
+      final_performance_summary: content.finalPerformanceSummary,
+      mentor_comments: comments,
+      additional_mentor_notes: mentorNotes,
+    };
+  }
+
   async function saveEdits() {
     if (!summary || !content) return;
     setBusy(true);
     setMessage("");
     try {
-      const updated = await updateFinalSummary(summary.id, {
-        overall_performance_summary: content.overallPerformanceSummary,
-        learning_journey: content.learningJourney,
-        main_achievements: content.mainAchievements,
-        goal_achievement: content.goalAchievement,
-        final_performance_summary: content.finalPerformanceSummary,
-        mentor_comments: comments,
-        additional_mentor_notes: mentorNotes,
-      });
+      const updated = await updateFinalSummary(summary.id, editPayload());
       setSummary(updated);
       setContent(updated.content);
       setStatus(updated.status);
@@ -97,15 +106,7 @@ export default function FinalSummaryDetailPage() {
     setBusy(true);
     setMessage("");
     try {
-      await updateFinalSummary(summary.id, {
-        overall_performance_summary: content.overallPerformanceSummary,
-        learning_journey: content.learningJourney,
-        main_achievements: content.mainAchievements,
-        goal_achievement: content.goalAchievement,
-        final_performance_summary: content.finalPerformanceSummary,
-        mentor_comments: comments,
-        additional_mentor_notes: mentorNotes,
-      });
+      await updateFinalSummary(summary.id, editPayload());
       const approved = await approveFinalSummary(summary.id);
       setSummary(approved);
       setContent(approved.content);
@@ -199,29 +200,40 @@ export default function FinalSummaryDetailPage() {
         <p className="mb-4 rounded-xl bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{message}</p>
       ) : null}
 
-      <div className="mb-4">
-        <InternshipWeekPerformanceTable weekPerformance={summary.weekPerformance} />
-      </div>
-
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="space-y-4">
         <section className="card p-5">
           <FinalSummaryContent
             content={content}
             editable={editable}
             onChange={setContent}
+            sections="intro"
+          />
+        </section>
+
+        <InternshipWeeksCompletedTasksTable
+          weeksCompletedTasks={summary.weeksCompletedTasks}
+        />
+        <InternshipWeekPerformanceTable weekPerformance={summary.weekPerformance} />
+
+        <section className="card p-5">
+          <FinalSummaryContent
+            content={content}
+            editable={editable}
+            onChange={setContent}
+            sections="narrative"
           />
         </section>
 
         <section className="card space-y-4 p-5">
           <div>
-            <p className="label">Final Score</p>
+            <h2 className="section-title text-brand-dark">Final Score</h2>
             <p className="mt-1 text-sm font-medium text-ink">{scoreLabel.scoreText}</p>
             {scoreLabel.detail ? (
               <p className="mt-1 text-xs text-ink-muted">{scoreLabel.detail}</p>
             ) : null}
           </div>
           <div>
-            <label className="label" htmlFor="comments">Mentor comments</label>
+            <label className="label" htmlFor="comments">Mentor Comments</label>
             <textarea
               id="comments"
               className="input"
@@ -258,6 +270,8 @@ export default function FinalSummaryDetailPage() {
             AI does not make hiring decisions.
           </p>
         </section>
+
+        <MentorSignatureBlock mentorName={summary.mentorName} />
       </div>
     </div>
   );

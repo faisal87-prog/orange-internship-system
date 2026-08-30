@@ -10,6 +10,7 @@ from services.final_summary_score import (
 from services.pdf import generate_final_summary_pdf, generate_weekly_report_pdf
 from services.week_performance import (
     build_final_summary_week_performance,
+    build_final_summary_weeks_completed_tasks,
     build_weekly_report_comparison,
 )
 from services.weekly_score import calculate_overall_weekly_score
@@ -133,11 +134,16 @@ class FinalSummaryGenerateContinueSerializer(serializers.Serializer):
 
 class FinalInternshipSummarySerializer(serializers.ModelSerializer):
     intern_name = serializers.CharField(source="intern.user.full_name", read_only=True)
+    mentor_name = serializers.CharField(
+        source="program.mentor.full_name",
+        read_only=True,
+    )
     pdf_url = serializers.SerializerMethodField()
     pdf_available = serializers.SerializerMethodField()
     final_score = serializers.SerializerMethodField()
     scored_weekly_report_count = serializers.SerializerMethodField()
     week_performance = serializers.SerializerMethodField()
+    weeks_completed_tasks = serializers.SerializerMethodField()
 
     class Meta:
         model = FinalInternshipSummary
@@ -145,7 +151,10 @@ class FinalInternshipSummarySerializer(serializers.ModelSerializer):
             "id",
             "intern",
             "intern_name",
+            "mentor_name",
             "program",
+            "internship_introduction",
+            "training_summary",
             "overall_performance_summary",
             "learning_journey",
             "main_achievements",
@@ -154,6 +163,7 @@ class FinalInternshipSummarySerializer(serializers.ModelSerializer):
             "final_score",
             "scored_weekly_report_count",
             "week_performance",
+            "weeks_completed_tasks",
             "mentor_comments",
             "additional_mentor_notes",
             "generated_by_ai",
@@ -171,6 +181,8 @@ class FinalInternshipSummarySerializer(serializers.ModelSerializer):
             "final_score",
             "scored_weekly_report_count",
             "week_performance",
+            "weeks_completed_tasks",
+            "mentor_name",
             "generated_by_ai",
             "approved_by",
             "approved_at",
@@ -210,6 +222,12 @@ class FinalInternshipSummarySerializer(serializers.ModelSerializer):
 
     def get_week_performance(self, obj):
         return build_final_summary_week_performance(
+            intern=obj.intern,
+            program=obj.program,
+        )
+
+    def get_weeks_completed_tasks(self, obj):
+        return build_final_summary_weeks_completed_tasks(
             intern=obj.intern,
             program=obj.program,
         )

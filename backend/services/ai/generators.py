@@ -8,6 +8,7 @@ from typing import Any
 from services.ai import client as openai_client
 from services.ai import config
 from services.ai.exceptions import AIInvalidOutputError
+from services.ai.logging_utils import log_roadmap_failure, logger
 from services.ai.schemas import GeneratedRoadmap
 from services.ai.validators import validate_generated_roadmap
 
@@ -39,6 +40,7 @@ def generate_roadmap_structure(
 
     Retries once on invalid structured/business output using the same prompt.
     """
+    program_id = (context.get("program") or {}).get("id")
     user_payload = {
         "final_roadmap_generation_prompt": final_roadmap_generation_prompt,
         "canonical_context": context,
@@ -76,7 +78,8 @@ def generate_roadmap_structure(
     ]
 
     last_error: Exception | None = None
-    for _attempt in range(2):
+    for attempt in range(2):
+        attempt_no = attempt + 1
         try:
             parsed = openai_client.parse_structured(
                 model=config.roadmap_model(),
@@ -86,5 +89,19 @@ def generate_roadmap_structure(
             return validate_generated_roadmap(parsed, context=context)
         except AIInvalidOutputError as exc:
             last_error = exc
+            if getattr(exc, "program_id", None) is None and program_id is not None:
+                exc.program_id = program_id
+                if hasattr(exc, "_build_diagnostic"):
+                    exc.diagnostic = exc._build_diagnostic()
+            log_roadmap_failure(
+                f"ROADMAP_GENERATION_ATTEMPT_{attempt_no}_FAILED",
+                exc=exc,
+                program_id=program_id,
+            )
+            if attempt == 0:
+                logger.warning("ROADMAP_GENERATION_RETRY_STARTED")
             continue
-    raise last_error or AIInvalidOutputError()
+    raise last_error or AIInvalidOutputError(
+        reason="Roadmap generation failed after retry",
+        program_id=program_id,
+    )

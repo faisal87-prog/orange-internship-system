@@ -25,6 +25,7 @@ from common.constants import (
 )
 from services.week_performance import (
     build_final_summary_week_performance,
+    build_final_summary_weeks_completed_tasks,
     build_weekly_report_comparison,
 )
 
@@ -371,3 +372,69 @@ class WeekPerformanceTests(TestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(len(response.data["week_performance"]["weeks"]), 4)
         self.assertEqual(response.data["final_score"], 81.0)  # (78+84)/2
+
+    def test_final_summary_weeks_completed_tasks_table(self):
+        week1, week2, week3, week4 = self.weeks
+        task_done = self._make_task(week1, "Build Inquiry Model")
+        task_open = self._make_task(week1, "Still Open")
+        task_week2 = self._make_task(week2, "Integrate OpenAI")
+        task_week3 = self._make_task(week3, "Empty Week Task")
+        self._assign(
+            task_done,
+            self.intern,
+            status_value=TaskAssignmentStatus.COMPLETED,
+            submitted_on=week1.start_date + timedelta(days=1),
+        )
+        self._assign(task_open, self.intern, status_value=TaskAssignmentStatus.TO_DO)
+        self._assign(
+            task_week2,
+            self.intern,
+            status_value=TaskAssignmentStatus.COMPLETED,
+            submitted_on=week2.start_date + timedelta(days=1),
+        )
+        self._assign(task_week3, self.intern, status_value=TaskAssignmentStatus.TO_DO)
+        # Other intern completed noise must not appear.
+        self._assign(
+            task_done,
+            self.other,
+            status_value=TaskAssignmentStatus.COMPLETED,
+            submitted_on=week1.start_date + timedelta(days=1),
+        )
+
+        payload = build_final_summary_weeks_completed_tasks(
+            intern=self.intern,
+            program=self.program,
+        )
+        weeks = payload["weeks"]
+        self.assertEqual([row["week_number"] for row in weeks], [1, 2, 3, 4])
+        self.assertEqual(weeks[0]["main_focus"], "Focus 1")
+        self.assertEqual(weeks[0]["completed_task_titles"], ["Build Inquiry Model"])
+        self.assertEqual(weeks[1]["completed_task_titles"], ["Integrate OpenAI"])
+        self.assertEqual(weeks[2]["completed_task_titles"], [])
+        self.assertEqual(weeks[3]["completed_task_titles"], [])
+        self.assertEqual(weeks[3]["main_focus"], "Focus 4")
+
+        summary = FinalInternshipSummary.objects.create(
+            intern=self.intern,
+            program=self.program,
+            internship_introduction="Program purpose with enough detail for tests.",
+            training_summary="Training overview with enough detail for tests.",
+            overall_performance_summary="Overall summary with enough detail for tests.",
+            learning_journey="Learning journey with enough detail for tests.",
+            main_achievements=["Achievement"],
+            goal_achievement="Goal achievement with enough detail for tests.",
+            final_performance_summary="Final performance with enough detail for tests.",
+            status=AiContentStatus.DRAFT,
+        )
+        self.client.force_authenticate(user=self.mentor)
+        response = self.client.get(f"/api/reports/final-summaries/{summary.id}/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        rows = response.data["weeks_completed_tasks"]["weeks"]
+        self.assertEqual(len(rows), 4)
+        self.assertEqual(rows[0]["completed_task_titles"], ["Build Inquiry Model"])
+        self.assertEqual(response.data["mentor_name"], "Mentor WP")
+        # Performance table still present and separate.
+        self.assertEqual(len(response.data["week_performance"]["weeks"]), 4)
+        blob = str(response.data["weeks_completed_tasks"])
+        self.assertNotIn("mentor_feedback", blob)
+        self.assertNotIn("Good work", blob)

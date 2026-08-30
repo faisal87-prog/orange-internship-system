@@ -18,7 +18,7 @@ Use the canonical structured final-summary context as authoritative evidence.
 Do not invent activity, scores, feedback, achievements, or improvement.
 Do not output final_score, mentor_comments, or additional notes.
 Do not produce hiring/employment recommendations.
-Return only the five required string fields.
+Return only the seven required string fields.
 """.strip()
 
 
@@ -32,6 +32,8 @@ def generate_final_summary_structure(
         "final_final_summary_generation_prompt": final_final_summary_generation_prompt,
         "canonical_final_summary_context": context,
         "required_fields": [
+            "internship_introduction",
+            "training_summary",
             "overall_performance_summary",
             "learning_journey",
             "main_achievements",

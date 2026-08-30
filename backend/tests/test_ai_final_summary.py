@@ -52,6 +52,14 @@ def build_prompt() -> GeneratedFinalSummaryPrompt:
 
 def build_summary() -> GeneratedFinalSummary:
     return GeneratedFinalSummary(
+        internship_introduction=(
+            "This internship develops API and testing skills through guided weekly work "
+            "aligned to program goals and a final project."
+        ),
+        training_summary=(
+            "Training covered backend foundations, testing practices, and progressive "
+            "delivery toward the program final project."
+        ),
         overall_performance_summary=(
             "The intern completed required work with consistent quality across the program."
         ),
@@ -716,3 +724,59 @@ class AIFinalSummaryTests(TestCase):
             mock_refresh.assert_called()
             mock_display.assert_called_with(Decimal("80.0"))
         self.assertTrue(summary.pdf_file)
+
+    @patch("services.ai.client.parse_structured")
+    def test_generated_fields_weeks_table_and_signature(self, mock_parse):
+        from io import BytesIO
+
+        from pypdf import PdfReader
+
+        from services.pdf import generate_final_summary_pdf
+
+        self._mock_full(mock_parse)
+        self.auth(self.mentor)
+        preview = self._build_prompt()
+        created = self.client.post(
+            CONTINUE_URL,
+            {"preview_id": preview.data["preview_id"]},
+            format="json",
+        )
+        self.assertEqual(created.status_code, status.HTTP_201_CREATED)
+        summary_id = created.data["id"]
+        self.assertTrue(created.data["internship_introduction"])
+        self.assertTrue(created.data["training_summary"])
+        self.assertTrue(created.data["overall_performance_summary"])
+        self.assertTrue(created.data["learning_journey"])
+        self.assertTrue(created.data["main_achievements"])
+        self.assertTrue(created.data["goal_achievement"])
+        self.assertTrue(created.data["final_performance_summary"])
+        self.assertEqual(created.data["mentor_name"], "Mentor FS")
+
+        weeks_tasks = created.data["weeks_completed_tasks"]["weeks"]
+        self.assertEqual([row["week_number"] for row in weeks_tasks], [1, 2])
+        self.assertEqual(weeks_tasks[0]["main_focus"], "APIs")
+        self.assertEqual(weeks_tasks[0]["completed_task_titles"], ["API Task"])
+        self.assertEqual(weeks_tasks[1]["completed_task_titles"], [])
+        self.assertEqual(len(created.data["week_performance"]["weeks"]), 2)
+
+        summary = FinalInternshipSummary.objects.select_related(
+            "intern__user", "program__mentor"
+        ).get(id=summary_id)
+        generate_final_summary_pdf(summary)
+        summary.refresh_from_db()
+        pdf_text = ""
+        with summary.pdf_file.open("rb") as handle:
+            reader = PdfReader(BytesIO(handle.read()))
+            for page in reader.pages:
+                pdf_text += page.extract_text() or ""
+        self.assertIn("Internship Introduction", pdf_text)
+        self.assertIn("Training Summary", pdf_text)
+        self.assertIn("Internship Weeks", pdf_text)
+        self.assertIn("Completed Tasks", pdf_text)
+        self.assertIn("Main Focus", pdf_text)
+        self.assertIn("Internship Performance by Week", pdf_text)
+        self.assertIn("Mentor Signature", pdf_text)
+        self.assertIn("Mentor FS", pdf_text)
+        self.assertIn("API Task", pdf_text)
+        self.assertIn("No completed tasks recorded.", pdf_text)
+        self.assertNotIn("Good work", pdf_text)

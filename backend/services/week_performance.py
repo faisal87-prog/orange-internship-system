@@ -219,6 +219,37 @@ def build_final_summary_week_performance(
     }
 
 
+def build_final_summary_weeks_completed_tasks(
+    *,
+    intern: InternProfile,
+    program: InternshipProgram,
+) -> dict[str, Any]:
+    """
+    System table: Week | Main Focus | Completed Task titles.
+
+    Includes every applicable roadmap week. Only COMPLETED assignments for the
+    selected Intern are listed (titles only).
+    """
+    weeks = _resolve_program_weeks(program=program)
+    rows: list[dict[str, Any]] = []
+    for week in weeks:
+        assignments = list(_assignments_for_week(intern=intern, week=week))
+        completed_titles = [
+            assignment.task.title
+            for assignment in assignments
+            if assignment.status == TaskAssignmentStatus.COMPLETED
+            and (assignment.task.title or "").strip()
+        ]
+        rows.append(
+            {
+                "week_number": week.week_number,
+                "main_focus": (week.weekly_focus or "").strip() or None,
+                "completed_task_titles": completed_titles,
+            }
+        )
+    return {"weeks": rows}
+
+
 def format_signed_change(value: int | None) -> str:
     if value is None:
         return "—"

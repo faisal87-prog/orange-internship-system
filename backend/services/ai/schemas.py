@@ -68,6 +68,8 @@ class GeneratedFinalSummaryPrompt(BaseModel):
 
 
 class GeneratedFinalSummary(BaseModel):
+    internship_introduction: str
+    training_summary: str
     overall_performance_summary: str
     learning_journey: str
     main_achievements: str

@@ -209,13 +209,15 @@ export interface FinalSummary {
   programId: string;
   status: AiContentStatus;
   content: {
+    internshipIntroduction: string;
+    trainingSummary: string;
     overallPerformanceSummary: string;
     learningJourney: string;
     mainAchievements: string[];
     goalAchievement: string;
     finalPerformanceSummary: string;
   };
-    mentorFinalScore?: number;
+  mentorFinalScore?: number;
   scoredWeeklyReportCount?: number;
   weekPerformance?: {
     weeks: Array<{
@@ -227,6 +229,14 @@ export interface FinalSummary {
       main_focus: string | null;
     }>;
   };
+  weeksCompletedTasks?: {
+    weeks: Array<{
+      week_number: number;
+      main_focus: string | null;
+      completed_task_titles: string[];
+    }>;
+  };
+  mentorName?: string;
   mentorFinalComments?: string;
   /** Extra notes/context added by the mentor while editing */
   additionalMentorNotes?: string;

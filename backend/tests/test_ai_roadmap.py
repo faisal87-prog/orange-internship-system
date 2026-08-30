@@ -880,3 +880,358 @@ class AIRoadmapTwoStepTests(TestCase):
             TaskAssignment.objects.filter(task_id=created.data["id"]).count(),
             1,
         )
+
+
+class RoadmapValidationDiagnosticsTests(TestCase):
+    """Expose real invalid_output causes via development logs (no rule changes)."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.mentor = User.objects.create_user(
+            email="mentor-diag@ai.test",
+            username="mentor_diag",
+            password="pass1234",
+            full_name="Mentor Diag",
+            role=Role.MENTOR,
+        )
+        MentorProfile.objects.create(user=self.mentor, department="Eng", job_title="Lead")
+        self.program = InternshipProgram.objects.create(
+            mentor=self.mentor,
+            title="Diag Program",
+            description="Desc",
+            role="Intern",
+            start_date=date(2026, 6, 1),
+            end_date=date(2026, 6, 28),
+            duration_weeks=4,
+            department="Engineering",
+            weekly_hours=20,
+            maximum_interns=3,
+            goals="Ship",
+            skills_to_develop=["APIs"],
+            expected_outcome="Ready",
+            final_project="Capstone",
+            status=ProgramStatus.ACTIVE,
+        )
+
+    def _context(self):
+        return {
+            "program": {
+                "id": self.program.id,
+                "duration_weeks": self.program.duration_weeks,
+                "start_date": self.program.start_date.isoformat(),
+                "end_date": self.program.end_date.isoformat(),
+            }
+        }
+
+    def test_invalid_week_count_logs_useful_reason(self):
+        roadmap = build_valid_roadmap(self.program)
+        roadmap = roadmap.model_copy(
+            update={
+                "number_of_weeks": 4,
+                "weeks": roadmap.weeks[:3],
+            }
+        )
+        with self.assertLogs("ai.generation", level="WARNING") as cm:
+            with self.assertRaises(AIInvalidOutputError) as raised:
+                validate_generated_roadmap(roadmap, context=self._context())
+        self.assertEqual(
+            raised.exception.user_message,
+            "AI roadmap generation could not produce a valid roadmap. Please try again.",
+        )
+        self.assertEqual(raised.exception.reason, "Expected exactly 4 weeks")
+        self.assertEqual(raised.exception.expected, 4)
+        self.assertEqual(raised.exception.received, 3)
+        joined = "\n".join(cm.output)
+        self.assertIn("ROADMAP_VALIDATION_FAILED", joined)
+        self.assertIn("Expected exactly 4 weeks", joined)
+        self.assertIn("Expected: 4", joined)
+        self.assertIn("Received: 3", joined)
+        self.assertNotIn("sk-", joined)
+        self.assertNotIn("api_key", joined.lower())
+
+    def test_invalid_task_due_date_logs_useful_reason(self):
+        from services.ai.validators import week_boundaries
+
+        roadmap = build_valid_roadmap(self.program)
+        week_start, week_end = week_boundaries(
+            self.program.start_date,
+            self.program.end_date,
+            1,
+            self.program.duration_weeks,
+        )
+        bad_due = (week_end + timedelta(days=1)).isoformat()
+        roadmap.weeks[0].tasks[0].due_date = bad_due
+        with self.assertLogs("ai.generation", level="WARNING") as cm:
+            with self.assertRaises(AIInvalidOutputError) as raised:
+                validate_generated_roadmap(roadmap, context=self._context())
+        self.assertEqual(raised.exception.reason, "Task due date outside week range")
+        self.assertEqual(raised.exception.path, "weeks[0].tasks[0].due_date")
+        self.assertIn(week_start.isoformat(), str(raised.exception.expected))
+        self.assertIn(week_end.isoformat(), str(raised.exception.expected))
+        self.assertEqual(raised.exception.received, bad_due)
+        joined = "\n".join(cm.output)
+        self.assertIn("ROADMAP_VALIDATION_FAILED", joined)
+        self.assertIn("Task due date outside week range", joined)
+        self.assertIn("weeks[0].tasks[0].due_date", joined)
+
+    def test_missing_required_generated_field_logs_useful_reason(self):
+        from pydantic import ValidationError
+
+        from services.ai.client import _invalid_from_validation_error
+        from services.ai.schemas import GeneratedRoadmap
+
+        with self.assertRaises(ValidationError) as pydantic_exc:
+            GeneratedRoadmap.model_validate(
+                {
+                    "title": "Incomplete",
+                    "summary": "Missing weeks",
+                    "number_of_weeks": 4,
+                }
+            )
+        with self.assertLogs("ai.generation", level="WARNING") as cm:
+            err = _invalid_from_validation_error(
+                pydantic_exc.exception,
+                text_format=GeneratedRoadmap,
+            )
+        self.assertIsInstance(err, AIInvalidOutputError)
+        self.assertEqual(
+            err.user_message,
+            "AI roadmap generation could not produce a valid roadmap. Please try again.",
+        )
+        joined = "\n".join(cm.output)
+        self.assertIn("ROADMAP_STRUCTURED_OUTPUT_FAILED", joined)
+        self.assertTrue(err.path == "weeks" or "weeks" in (err.reason or ""))
+        self.assertNotIn("OPENAI_API_KEY", joined)
+        self.assertNotIn("Bearer ", joined)
+
+    @patch("services.ai.client.parse_structured")
+    def test_retry_attempts_are_distinguishable_in_logs(self, mock_parse):
+        prompt = build_prompt()
+
+        def side_effect(*, model, input_messages, text_format):
+            if text_format is GeneratedRoadmapPrompt:
+                return prompt
+            raise AIInvalidOutputError(
+                reason="Forced invalid output for retry logging",
+                path="weeks",
+                expected=4,
+                received=2,
+            )
+
+        mock_parse.side_effect = side_effect
+        self.client.force_authenticate(user=self.mentor)
+        with self.assertLogs("ai.generation", level="WARNING") as cm:
+            preview = self.client.post(
+                PROMPT_URL,
+                {
+                    "program_id": self.program.id,
+                    "assignment_scope": "PROGRAM",
+                    "selected_intern_ids": [],
+                },
+                format="json",
+            )
+            self.assertEqual(preview.status_code, status.HTTP_200_OK)
+            response = self.client.post(
+                CONTINUE_URL,
+                {"preview_id": preview.data["preview_id"]},
+                format="json",
+            )
+        self.assertEqual(response.status_code, status.HTTP_503_SERVICE_UNAVAILABLE)
+        self.assertEqual(
+            response.data["detail"],
+            "AI roadmap generation could not produce a valid roadmap. Please try again.",
+        )
+        joined = "\n".join(cm.output)
+        self.assertIn("ROADMAP_GENERATION_ATTEMPT_1_FAILED", joined)
+        self.assertIn("ROADMAP_GENERATION_RETRY_STARTED", joined)
+        self.assertIn("ROADMAP_GENERATION_ATTEMPT_2_FAILED", joined)
+        self.assertIn("Forced invalid output for retry logging", joined)
+        self.assertNotIn("sk-", joined)
+
+    def test_valid_roadmap_behavior_unchanged(self):
+        roadmap = build_valid_roadmap(self.program)
+        cleaned = validate_generated_roadmap(roadmap, context=self._context())
+        self.assertEqual(cleaned.number_of_weeks, 4)
+        self.assertEqual(len(cleaned.weeks), 4)
+        self.assertTrue(cleaned.title)
+
+
+class RoadmapWeekBoundaryTests(TestCase):
+    """Canonical 7-day week boundaries shared by prompt + validator."""
+
+    PROGRAM_START = date(2026, 7, 22)
+    PROGRAM_END = date(2026, 9, 1)
+    DURATION_WEEKS = 6
+
+    EXPECTED = {
+        1: (date(2026, 7, 22), date(2026, 7, 28)),
+        2: (date(2026, 7, 29), date(2026, 8, 4)),
+        3: (date(2026, 8, 5), date(2026, 8, 11)),
+        4: (date(2026, 8, 12), date(2026, 8, 18)),
+        5: (date(2026, 8, 19), date(2026, 8, 25)),
+        6: (date(2026, 8, 26), date(2026, 9, 1)),
+    }
+
+    def setUp(self):
+        self.mentor = User.objects.create_user(
+            email="mentor-weeks@ai.test",
+            username="mentor_weeks",
+            password="pass1234",
+            full_name="Mentor Weeks",
+            role=Role.MENTOR,
+        )
+        MentorProfile.objects.create(user=self.mentor, department="Eng", job_title="Lead")
+        self.program = InternshipProgram.objects.create(
+            mentor=self.mentor,
+            title="AI Internship Management Platform Development",
+            description="Build an AI internship platform",
+            role="AI / Full-Stack Software Engineering Intern",
+            start_date=self.PROGRAM_START,
+            end_date=self.PROGRAM_END,
+            duration_weeks=self.DURATION_WEEKS,
+            department="Artificial Intelligence",
+            weekly_hours=40,
+            maximum_interns=5,
+            goals="Deliver MVP",
+            skills_to_develop=["APIs", "Testing"],
+            expected_outcome="Working platform",
+            final_project="Capstone",
+            status=ProgramStatus.ACTIVE,
+        )
+
+    def _context(self):
+        return {
+            "program": {
+                "id": self.program.id,
+                "title": self.program.title,
+                "description": self.program.description,
+                "role": self.program.role,
+                "department": self.program.department,
+                "start_date": self.program.start_date.isoformat(),
+                "end_date": self.program.end_date.isoformat(),
+                "duration_weeks": self.program.duration_weeks,
+                "weekly_hours": self.program.weekly_hours,
+                "maximum_interns": self.program.maximum_interns,
+                "goals": self.program.goals,
+                "skills_needed": [],
+                "skills_to_develop": self.program.skills_to_develop,
+                "expected_outcome": self.program.expected_outcome,
+                "final_project": self.program.final_project,
+                "additional_instructions": "",
+                "mentor": {"full_name": self.mentor.full_name},
+            },
+            "roadmap_scope": "PROGRAM",
+            "interns": [],
+            "reference_materials": [],
+            "mentor_focus_skills": [],
+            "unavailable_data": [],
+        }
+
+    def test_exact_six_week_boundaries_for_program(self):
+        from services.ai.roadmap_week_dates import week_boundaries
+        from services.ai.validators import week_boundaries as validator_week_boundaries
+
+        self.assertEqual(self.program.duration_weeks, 6)
+        self.assertEqual(self.program.start_date, self.PROGRAM_START)
+        self.assertEqual(self.program.end_date, self.PROGRAM_END)
+
+        for week_number, (expected_start, expected_end) in self.EXPECTED.items():
+            canonical = week_boundaries(
+                self.PROGRAM_START, self.PROGRAM_END, week_number, self.DURATION_WEEKS
+            )
+            validated = validator_week_boundaries(
+                self.PROGRAM_START, self.PROGRAM_END, week_number, self.DURATION_WEEKS
+            )
+            self.assertEqual(canonical, (expected_start, expected_end))
+            self.assertEqual(validated, canonical)
+
+        self.assertEqual(self.EXPECTED[1][0], date(2026, 7, 22))
+        self.assertEqual(self.EXPECTED[1][1], date(2026, 7, 28))
+        self.assertEqual(self.EXPECTED[2][0], date(2026, 7, 29))
+        self.assertEqual(self.EXPECTED[6], (date(2026, 8, 26), date(2026, 9, 1)))
+
+    def test_weeks_have_no_gaps_or_overlaps(self):
+        from services.ai.roadmap_week_dates import iter_program_week_boundaries
+
+        rows = iter_program_week_boundaries(
+            self.PROGRAM_START, self.PROGRAM_END, self.DURATION_WEEKS
+        )
+        self.assertEqual(len(rows), 6)
+        for index in range(len(rows) - 1):
+            _, _start, end = rows[index]
+            _, next_start, _next_end = rows[index + 1]
+            self.assertEqual(next_start, end + timedelta(days=1))
+            self.assertLess(end, next_start)
+
+    def test_jul_28_due_date_is_valid_for_week_1_jul_29_is_not(self):
+        """Regression: the Continue failure that rejected 2026-07-28 for Week 1."""
+        roadmap = build_valid_roadmap(self.program)
+        self.assertEqual(len(roadmap.weeks), 6)
+        # Exact failing case from production logs: Week 1 task due on Jul 28.
+        roadmap.weeks[0].tasks[0].due_date = "2026-07-28"
+
+        # Last day of Week 1 must validate.
+        cleaned = validate_generated_roadmap(roadmap, context=self._context())
+        self.assertEqual(cleaned.number_of_weeks, 6)
+        self.assertEqual(len(cleaned.weeks), 6)
+        self.assertEqual(cleaned.weeks[0].tasks[0].due_date, "2026-07-28")
+
+        # Day after Week 1 must fail for Week 1.
+        bad = build_valid_roadmap(self.program)
+        bad.weeks[0].tasks[0].due_date = "2026-07-29"
+        with self.assertRaises(AIInvalidOutputError) as raised:
+            validate_generated_roadmap(bad, context=self._context())
+        self.assertEqual(raised.exception.reason, "Task due date outside week range")
+        self.assertEqual(raised.exception.path, "weeks[0].tasks[0].due_date")
+        self.assertEqual(raised.exception.received, "2026-07-29")
+        self.assertIn("2026-07-22", str(raised.exception.expected))
+        self.assertIn("2026-07-28", str(raised.exception.expected))
+
+    def test_due_date_on_first_and_last_day_of_week_are_valid(self):
+        roadmap = build_valid_roadmap(self.program)
+        roadmap.weeks[1].tasks[0].due_date = "2026-07-29"  # Week 2 start
+        roadmap.weeks[1].tasks[1].due_date = "2026-08-04"  # Week 2 end
+        cleaned = validate_generated_roadmap(roadmap, context=self._context())
+        self.assertEqual(cleaned.weeks[1].tasks[0].due_date, "2026-07-29")
+        self.assertEqual(cleaned.weeks[1].tasks[1].due_date, "2026-08-04")
+
+    def test_final_week_never_exceeds_program_end(self):
+        from services.ai.roadmap_week_dates import week_boundaries
+
+        start, end = week_boundaries(
+            self.PROGRAM_START, self.PROGRAM_END, 6, self.DURATION_WEEKS
+        )
+        self.assertEqual(end, self.PROGRAM_END)
+        self.assertLessEqual(end, self.PROGRAM_END)
+        self.assertEqual(start, date(2026, 8, 26))
+
+    def test_prompt_uses_same_boundaries_as_validator(self):
+        from services.ai.final_prompt import build_final_roadmap_generation_prompt
+        from services.ai.roadmap_week_dates import week_boundaries
+        from services.ai.validators import week_boundaries as validator_week_boundaries
+
+        prompt_text = build_final_roadmap_generation_prompt(
+            context=self._context(),
+            prompt_builder_result=build_prompt(),
+        )
+        self.assertIn("AUTHORITATIVE ROADMAP WEEK BOUNDARIES", prompt_text)
+        for week_number in range(1, 7):
+            canonical = week_boundaries(
+                self.PROGRAM_START, self.PROGRAM_END, week_number, self.DURATION_WEEKS
+            )
+            validated = validator_week_boundaries(
+                self.PROGRAM_START, self.PROGRAM_END, week_number, self.DURATION_WEEKS
+            )
+            self.assertEqual(canonical, validated)
+            line = (
+                f"Week {week_number}: {canonical[0].isoformat()} → "
+                f"{canonical[1].isoformat()}"
+            )
+            self.assertIn(line, prompt_text)
+
+    def test_existing_valid_roadmap_generation_still_works(self):
+        roadmap = build_valid_roadmap(self.program)
+        cleaned = validate_generated_roadmap(roadmap, context=self._context())
+        self.assertEqual(cleaned.number_of_weeks, 6)
+        self.assertEqual(len(cleaned.weeks), 6)
+        self.assertTrue(cleaned.title)
